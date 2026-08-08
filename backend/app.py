@@ -335,7 +335,7 @@ def add_student():
             return jsonify({"code": 400, "message": "姓名不能为空"}), 400
 
         # 校验性别
-        if gender not in ["1", "0"]:
+        if gender not in [1, 0]:
             return jsonify({"code": 400, "message": "请选择性别"}), 400
 
         # 校验年龄
@@ -347,7 +347,7 @@ def add_student():
             return jsonify({"code": 400, "message": "年龄必须是数字"}), 400
 
         # 校验班级
-        if not class_id or not class_id.strip():
+        if not class_id:
             return jsonify({"code": 400, "message": "请选择班级"}), 400
 
         # 校验分数
@@ -467,7 +467,7 @@ def update_student(student_id):
             return jsonify({"code": 400, "message": "年龄必须是数字"}), 400
 
         # 校验班级
-        if not class_id:
+        if not class_id:  # 前端直接传的是数字，直接判断是否为None或空即可
             return jsonify({"code": 400, "message": "请选择班级"}), 400
 
         # 校验分数

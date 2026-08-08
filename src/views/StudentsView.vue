@@ -173,20 +173,18 @@ const addRules = {
     ],
     age: [
         { required: true, message: '请输入年龄', trigger: 'blur' },
-        { type: 'number', min: 1, max: 100, message: '年龄范围为1-100岁', trigger: 'blur' }
     ],
     class_id: [
         { required: true, message: '请选择班级', trigger: 'change' }
     ],
     score: [
         { required: true, message: '请输入分数', trigger: 'blur' },
-        { type: 'number', min: 0, max: 750, message: '分数范围为0-750', trigger: 'blur' }
     ]
 }
 
 const addForm = reactive({
     name: '',
-    gender: '',
+    gender: null,
     age: '',
     class_id: '',
     score: ''

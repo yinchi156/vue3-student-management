@@ -40,6 +40,7 @@ SIMPLE_CAPTCHA = CAPTCHA(config=YOUR_CONFIG)
 SIMPLE_CAPTCHA.init_app(app)
 
 
+# 验证码生成
 @app.route("/api/captcha", methods=["GET"])
 def get_captcha():
     new_captcha_dict = SIMPLE_CAPTCHA.create()
@@ -432,7 +433,6 @@ def get_class_options():
         "SELECT id, grade, class FROM class ORDER BY FIELD(grade, '高一', '高二', '高三'), class"
     )
     results = cursor.fetchall()
-    print("查到的班级数量:", len(results))
 
     data = []
     for row in results:
@@ -467,7 +467,7 @@ def update_student(student_id):
             return jsonify({"code": 400, "message": "年龄必须是数字"}), 400
 
         # 校验班级
-        if not class_id or not class_id.strip():
+        if not class_id:
             return jsonify({"code": 400, "message": "请选择班级"}), 400
 
         # 校验分数

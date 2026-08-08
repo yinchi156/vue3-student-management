@@ -16,7 +16,7 @@
                     <el-option label="分数" value="score" />
                 </el-select>
 
-                <el-input v-model="searchKeyword" placeholder="输入姓名搜索..." clearable style="width: 200px;"
+                <el-input v-model="searchKeyword" placeholder="输入关键词搜索..." clearable style="width: 200px;"
                     @keyup.enter="handleSearch" @clear="handleSearch" />
 
                 <el-date-picker v-model="dateRange" type="daterange" range-separator="至" start-placeholder="开始日期"
@@ -31,24 +31,28 @@
         <!-- 表格 -->
         <div style="border-radius:6px; overflow: hidden;">
             <el-table :data="studentList" stripe row-height="120"
-                style="width: 100%; margin-top: 12px;border-radius: 6px; overflow: hidden;border-bottom: 1px solid #e0e0e0;"
-                height="600" v-loading="loading">
-                <el-table-column prop="id" label="ID" width="60" />
+                style="width: 100%;  font-size: 15px; margin-top: 12px;border-radius: 6px; overflow: hidden;border-bottom: 1px solid #e0e0e0;"
+                height="600" v-loading="loading" :cell-style="{ textAlign: 'left' }">
+                <el-table-column prop="id" label="ID" width="80" />
                 <el-table-column prop="name" label="姓名" />
-                <el-table-column prop="gender" label="性别" width="60">
+                <el-table-column prop="gender" label="性别">
                     <template #default="{ row }">
                         {{ row.gender === 1 ? '男' : '女' }}
                     </template>
                 </el-table-column>
-                <el-table-column prop="age" label="年龄" width="60" />
-                <el-table-column prop="class" label="班级" />
-                <el-table-column prop="score" label="分数" width="80" />
-                <el-table-column prop="createTime" label="创建时间" width="160">
+                <el-table-column prop="age" label="年龄" />
+                <el-table-column prop="class" label="班级">
+                    <template #default="{ row }">
+                        {{ row.class }}班
+                    </template>
+                </el-table-column>
+                <el-table-column prop="score" label="分数" />
+                <el-table-column prop="createTime" label="创建时间">
                     <template #default="{ row }">
                         {{ formatDateTime(row.createTime) }}
                     </template>
                 </el-table-column>
-                <el-table-column label="操作" width="150" fixed="right">
+                <el-table-column label="操作" fixed="right">
                     <template #default="{ row }">
                         <el-button size="small" type="primary" @click="openEditDialog(row)">编辑</el-button>
                         <el-button size="small" type="danger" @click="handleDelete(row.id)">删除</el-button>
@@ -81,7 +85,8 @@
                 </el-form-item>
                 <el-form-item label="班级" prop="class_id">
                     <el-select v-model="addForm.class_id" placeholder="请选择班级">
-                        <el-option v-for="cls in classList" :key="cls.id" :label="cls.name" :value="cls.id" />
+                        <el-option v-for="cls in classList" :key="cls.id" :label="cls.grade + cls.class + '班'"
+                            :value="cls.id" />
                     </el-select>
                 </el-form-item>
                 <el-form-item label="分数" prop="score">
@@ -107,15 +112,16 @@
                     </el-radio-group>
                 </el-form-item>
                 <el-form-item label="年龄">
-                    <el-input-number v-model="editForm.age" :min="1" :max="100" />
+                    <el-input v-model="editForm.age" :min="1" :max="100" />
                 </el-form-item>
                 <el-form-item label="班级">
                     <el-select v-model="editForm.class_id" placeholder="请选择班级">
-                        <el-option v-for="cls in classList" :key="cls.id" :label="cls.name" :value="cls.id" />
+                        <el-option v-for="cls in classList" :key="cls.id" :label="cls.grade + cls.class + '班'"
+                            :value="cls.id" />
                     </el-select>
                 </el-form-item>
                 <el-form-item label="分数">
-                    <el-input-number v-model="editForm.score" :min="0" :max="750" />
+                    <el-input v-model="editForm.score" :min="0" :max="750" />
                 </el-form-item>
             </el-form>
             <template #footer>
@@ -177,6 +183,7 @@ const addRules = {
         { type: 'number', min: 0, max: 750, message: '分数范围为0-750', trigger: 'blur' }
     ]
 }
+
 const addForm = reactive({
     name: '',
     gender: '',
@@ -192,7 +199,7 @@ const editForm = reactive({
     name: '',
     gender: 1,
     age: 18,
-    class_id: '',
+    class_id: null,
     score: 60
 })
 
@@ -241,7 +248,7 @@ const loadData = async () => {
 // 加载班级列表
 const loadClassList = async () => {
     try {
-        const res = await request.get(`/classes`)
+        const res = await request.get(`/classes/options`)
         if (res.data.code === 200) {
             classList.value = res.data.data//返回班级列表
         }
@@ -326,7 +333,7 @@ const confirmAdd = async () => {
             addDialogVisible.value = false
             loadData()
         }
-    } catch {
+    } catch (error) {
         const msg = error.response?.data?.message || '添加失败'
         ElMessage.error(msg)
     }
@@ -342,7 +349,7 @@ const openEditDialog = async (row) => {
             editForm.name = data.name
             editForm.gender = data.gender
             editForm.age = data.age
-            editForm.class_id = data.class_id
+            editForm.class_id = data.class_id  // 本来就是数字，不用转
             editForm.score = data.score
             editDialogVisible.value = true
         }
@@ -363,8 +370,9 @@ const confirmEdit = async () => {
             editDialogVisible.value = false
             loadData()
         }
-    } catch {
-        ElMessage.error('修改失败')
+    } catch (error) {
+        const msg = error.response?.data?.message || '修改失败'
+        ElMessage.error(msg)
     }
 }
 

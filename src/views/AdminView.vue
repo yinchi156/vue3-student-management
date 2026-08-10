@@ -45,11 +45,11 @@
                         </el-icon>
                         <span>科目管理</span>
                     </el-menu-item>
-                    <el-menu-item index="/admin/admins">
+                    <el-menu-item index="/admin/users">
                         <el-icon>
                             <Setting />
                         </el-icon>
-                        <span>管理员管理</span>
+                        <span>用户管理</span>
                     </el-menu-item>
                 </el-menu>
             </el-aside>

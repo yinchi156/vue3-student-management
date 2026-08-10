@@ -4,6 +4,7 @@ import AdminView from '../views/AdminView.vue'
 import StudentsView from '../views/StudentsView.vue'
 import ClassesView from '../views/ClassesView.vue'
 import SubjectsView from '../views/SubjectsView.vue'
+import UsersView from '../views/UsersView.vue'
 
 const router = createRouter({
   // 路由模式：HTML5 历史模式（无 # 号）
@@ -25,9 +26,9 @@ const router = createRouter({
     { path: 'students', component: StudentsView },
     { path: 'classes', component: ClassesView },
     { path: 'subjects', component: SubjectsView },
+    { path: 'users', component: UsersView },
     { path: '', redirect: '/admin/students' }  // 默认显示学生管理
   ]
-  //   // { path: 'admins', component: AdminsView },
     },
 
   ]

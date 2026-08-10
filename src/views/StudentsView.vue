@@ -2,30 +2,28 @@
     <div class="main-content">
         <!-- 搜索筛选栏 -->
         <div class="filter-bar">
-            <div class="filter-left">
-                <!-- 性别筛选 -->
-                <el-checkbox-group v-model="genderFilter" class="gender-group" @change="handleGenderFilterChange">
-                    <el-checkbox :label="1">男</el-checkbox>
-                    <el-checkbox :label="0">女</el-checkbox>
-                </el-checkbox-group>
-                <el-select v-model="selectedFields" multiple collapse-tags collapse-tags-tooltip placeholder="筛选字段"
-                    style="width: 180px;">
-                    <el-option label="姓名" value="name" />
-                    <el-option label="班级" value="class" />
-                    <el-option label="年龄" value="age" />
-                    <el-option label="分数" value="score" />
-                </el-select>
+            <!-- 性别筛选 -->
+            <el-checkbox-group v-model="genderFilter" class="gender-group" size="large"
+                @change="handleGenderFilterChange">
+                <el-checkbox :label="1" value="1">男</el-checkbox>
+                <el-checkbox :label="0" value="0">女</el-checkbox>
+            </el-checkbox-group>
+            <el-select v-model="selectedFields" size="large" multiple collapse-tags collapse-tags-tooltip
+                placeholder="筛选字段" style="width: 180px;">
+                <el-option label="姓名" value="name" />
+                <el-option label="班级" value="class" />
+                <el-option label="年龄" value="age" />
+                <el-option label="分数" value="score" />
+            </el-select>
+            <el-input v-model="searchKeyword" placeholder="输入关键词搜索..." clearable style="flex: 1; min-width: 150px;"
+                size="large" @keyup.enter="handleSearch" @clear="handleSearch" />
 
-                <el-input v-model="searchKeyword" placeholder="输入关键词搜索..." clearable style="width: 200px;"
-                    @keyup.enter="handleSearch" @clear="handleSearch" />
+            <el-date-picker v-model="dateRange" size="large" type="daterange" range-separator="至"
+                start-placeholder="开始日期" end-placeholder="结束日期" value-format="YYYY-MM-DD" style="max-width: 220px;" />
 
-                <el-date-picker v-model="dateRange" type="daterange" range-separator="至" start-placeholder="开始日期"
-                    end-placeholder="结束日期" value-format="YYYY-MM-DD" style="width: 240px;" />
-
-                <el-button type="primary" @click="handleSearch">搜索</el-button>
-                <el-button @click="resetSearch">重置</el-button>
-                <el-button type="success" @click="openAddDialog">添加学生</el-button>
-            </div>
+            <el-button type="primary" @click="handleSearch">搜索</el-button>
+            <el-button @click="resetSearch">重置</el-button>
+            <el-button type="success" @click="openAddDialog">添加学生</el-button>
         </div>
 
         <!-- 表格 -->
@@ -133,13 +131,11 @@
 </template>
 
 <script setup>
+import { Search } from '@element-plus/icons-vue'
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import request from '@/utils/request'
-
-// API 基础地址
-console.log(import.meta.env.VITE_API_BASE_URL)
 
 // 表格数据
 const studentList = ref([])
@@ -229,7 +225,6 @@ const loadData = async () => {
             start_date: dateRange.value?.[0] || '',
             end_date: dateRange.value?.[1] || ''
         }
-        console.log('请求参数:', params)
         const res = await request.get(`/students`, { params })
         if (res.data.code === 200) {
             studentList.value = res.data.data
@@ -419,13 +414,6 @@ onMounted(() => {
     padding: 12px 16px;
     border-radius: 8px;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
-}
-
-.filter-left {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    align-items: center;
 }
 
 .gender-group {

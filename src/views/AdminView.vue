@@ -67,6 +67,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { DataBoard, User, UserFilled, Setting } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const username = ref(localStorage.getItem('loggedInUser') || '管理员')

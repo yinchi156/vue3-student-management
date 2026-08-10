@@ -5,6 +5,7 @@ import router from '../router'
 
 
 const request = axios.create({
+  //这里定义了baseURL，前端代码不需要加/api
   baseURL: '/api',  // 你的后端地址
   timeout: 10000
 })

@@ -785,7 +785,7 @@ def delete_class(class_id):
         conn.close()
 
 
-# 科目管理表填充接口
+# 科目管理表格填充接口
 @app.route("/api/subjects", methods=["GET"])
 def get_subjects():
     payload = verify_token()
@@ -795,27 +795,37 @@ def get_subjects():
     page = request.args.get("page", 1, type=int)
     limit = request.args.get("limit", 10, type=int)
     offset = (page - 1) * limit
+    search = request.args.get("search", "")  # 获取搜索关键词
 
     conn = pymysql.connect(**DB_CONFIG)
     cursor = conn.cursor()
 
     try:
+        # 构建搜索条件
+        where_clause = ""
+        params = []
+        if search:
+            where_clause = "WHERE s.subject LIKE %s"
+            params.append("%" + search + "%")
+
         # 总记录数
-        cursor.execute("SELECT COUNT(*) FROM subjects")
+        count_sql = f"SELECT COUNT(*) FROM subjects s {where_clause}"
+        cursor.execute(count_sql, params)
         total = cursor.fetchone()[0]
 
-        # 分页查询（通过中间表关联班级）
-        sql = """
+        # 分页查询
+        sql = f"""
             SELECT s.id, s.subject, s.full_score, s.is_class_special, s.created_at,
                    GROUP_CONCAT(CONCAT(c.grade, c.class, '班') SEPARATOR '、') AS class_names
             FROM subjects s
             LEFT JOIN subject_classes sc ON s.id = sc.subjects_id
             LEFT JOIN class c ON sc.class_id = c.id
+            {where_clause}
             GROUP BY s.id
             ORDER BY s.id DESC
             LIMIT %s OFFSET %s
         """
-        cursor.execute(sql, (limit, offset))
+        cursor.execute(sql, params + [limit, offset])
         results = cursor.fetchall()
 
         data = []
@@ -827,7 +837,7 @@ def get_subjects():
                     "full_score": row[2],
                     "is_class_special": row[3],
                     "created_at": row[4],
-                    "class_names": row[5] if row[5] else "全校",  # 多个班级用顿号分隔
+                    "class_names": row[5] if row[5] else "全校",
                 }
             )
 

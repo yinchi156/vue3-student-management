@@ -35,13 +35,13 @@
                     </el-menu-item>
                     <el-menu-item index="/admin/classes">
                         <el-icon>
-                            <User />
+                            <School />
                         </el-icon>
                         <span>班级管理</span>
                     </el-menu-item>
-                    <el-menu-item index="/admin/projects">
+                    <el-menu-item index="/admin/subjects">
                         <el-icon>
-                            <UserFilled />
+                            <Notebook />
                         </el-icon>
                         <span>科目管理</span>
                     </el-menu-item>
@@ -67,7 +67,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { DataBoard, User, UserFilled, Setting } from '@element-plus/icons-vue'
+import { DataBoard, School, Notebook, Setting } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const username = ref(localStorage.getItem('loggedInUser') || '管理员')

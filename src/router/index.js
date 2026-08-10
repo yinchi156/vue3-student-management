@@ -5,6 +5,11 @@ import StudentsView from '../views/StudentsView.vue'
 import ClassesView from '../views/ClassesView.vue'
 import SubjectsView from '../views/SubjectsView.vue'
 import UsersView from '../views/UsersView.vue'
+import TeacherLayout from '../views/teacher/TeacherLayout.vue'
+import MyClasses from '../views/teacher/MyClasses.vue'
+import ScoreEntry from '../views/teacher/ScoreEntry.vue'
+import ScoreView from '../views/teacher/ScoreView.vue'
+import StudentView from '../views/student/StudentView.vue'
 
 const router = createRouter({
   // 路由模式：HTML5 历史模式（无 # 号）
@@ -22,6 +27,7 @@ const router = createRouter({
       component: LoginView
     },
     { path: '/admin', component: AdminView,
+      meta: { roles: ['admin'] },
       children: [
     { path: 'students', component: StudentsView },
     { path: 'classes', component: ClassesView },
@@ -31,7 +37,52 @@ const router = createRouter({
   ]
     },
 
+    {
+  path: '/teacher',
+  component: TeacherLayout,
+  meta: { roles: ['admin','teacher'] },
+  children: [
+    { path: '', redirect: '/teacher/classes' },
+    { path: 'classes', component: MyClasses },
+    { path: 'score-entry', component: ScoreEntry },
+    { path: 'score-view', component: ScoreView }
   ]
+},
+{
+  path: '/student',
+  component: StudentView,  // 学生布局（复用 TeacherLayout 的样式，或者新建一个）
+  meta: { roles: ['admin','teacher','user'] },
+  children: [
+    { path: '', redirect: '/student/scores' },
+    { path: 'scores', component: StudentView }
+  ]
+},
+
+
+  ]
+})
+
+router.beforeEach((to) => {
+  const role = localStorage.getItem('role') || 'user'
+  const allowedRoles = to.meta.roles || []
+
+  // 如果路由没有定义 roles，默认所有人都能访问
+  if (allowedRoles.length === 0) {
+    return true
+  }
+
+  // 检查当前角色是否在允许列表中
+  if (allowedRoles.includes(role)) {
+    return true
+  } else {
+    // 无权限，跳转到对应角色的默认页面
+    const redirectMap = {
+      admin: '/admin/students',
+      teacher: '/teacher/classes',
+      student: '/student/dashboard'
+    }
+    return redirectMap[role] || '/login'
+  }
 })
 
 export default router

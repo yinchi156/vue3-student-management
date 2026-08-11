@@ -13,7 +13,7 @@
                 <el-option label="姓名" value="name" />
                 <el-option label="班级" value="class" />
                 <el-option label="年龄" value="age" />
-                <el-option label="分数" value="score" />
+                <el-option label="总分" value="score" />
             </el-select>
             <el-input v-model="searchKeyword" placeholder="输入关键词搜索..." clearable style="flex: 1; min-width: 150px;"
                 size="large" @keyup.enter="handleSearch" @clear="handleSearch" />
@@ -44,7 +44,7 @@
                         {{ row.class }}班
                     </template>
                 </el-table-column>
-                <el-table-column prop="score" label="分数" />
+                <el-table-column prop="total_score" label="总分" />
                 <el-table-column prop="createTime" label="创建时间">
                     <template #default="{ row }">
                         {{ formatDateTime(row.createTime) }}
@@ -74,21 +74,28 @@
                 </el-form-item>
                 <el-form-item label="性别" prop="gender">
                     <el-radio-group v-model="addForm.gender">
-                        <el-radio :label="1">男</el-radio>
-                        <el-radio :label="0">女</el-radio>
+                        <el-radio label="男" :value="1" />
+                        <el-radio label="女" :value="0" />
                     </el-radio-group>
                 </el-form-item>
                 <el-form-item label="年龄" prop="age">
                     <el-input v-model="addForm.age" placeholder="请输入年龄" :min="1" :max="100" />
                 </el-form-item>
                 <el-form-item label="班级" prop="class_id">
-                    <el-select v-model="addForm.class_id" placeholder="请选择班级">
+                    <el-select v-model="addForm.class_id" placeholder="请选择班级" @change="onClassChange">
                         <el-option v-for="cls in classList" :key="cls.id" :label="cls.grade + cls.class + '班'"
                             :value="cls.id" />
                     </el-select>
                 </el-form-item>
-                <el-form-item label="分数" prop="score">
-                    <el-input v-model="addForm.score" placeholder="请输入分数" :min="0" :max="750" />
+                <!-- 科目分数：只有在选择了班级后才显示 -->
+                <el-form-item v-if="addForm.class_id" label="科目分数">
+                    <div v-for="subject in subjectList" :key="subject.id"
+                        style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                        <span style="width: 80px;">{{ subject.subject }}</span>
+                        <el-input-number v-model="addForm.scores[subject.id]" :min="0" :max="subject.full_score"
+                            :precision="1" :step="0.5" size="small" />
+                        <span style="font-size: 12px; color: #999;">满分 {{ subject.full_score }}</span>
+                    </div>
                 </el-form-item>
             </el-form>
             <template #footer>
@@ -99,27 +106,33 @@
 
         <!-- 编辑弹窗 -->
         <el-dialog v-model="editDialogVisible" title="修改学生" width="400px">
-            <el-form :model="editForm" :rules="editRules" label-width="60px">
+            <el-form :model="editForm" label-width="60px">
                 <el-form-item label="姓名">
                     <el-input v-model="editForm.name" placeholder="请输入姓名" />
                 </el-form-item>
                 <el-form-item label="性别">
                     <el-radio-group v-model="editForm.gender">
-                        <el-radio :label="1">男</el-radio>
-                        <el-radio :label="0">女</el-radio>
+                        <el-radio label="男" :value="1" />
+                        <el-radio label="女" :value="0" />
                     </el-radio-group>
                 </el-form-item>
                 <el-form-item label="年龄">
                     <el-input v-model="editForm.age" :min="1" :max="100" />
                 </el-form-item>
                 <el-form-item label="班级">
-                    <el-select v-model="editForm.class_id" placeholder="请选择班级">
+                    <el-select v-model="editForm.class_id" placeholder="请选择班级" @change="onClassChange">
                         <el-option v-for="cls in classList" :key="cls.id" :label="cls.grade + cls.class + '班'"
                             :value="cls.id" />
                     </el-select>
                 </el-form-item>
-                <el-form-item label="分数">
-                    <el-input v-model="editForm.score" :min="0" :max="750" />
+                <el-form-item v-if="editForm.class_id" label="科目分数">
+                    <div v-for="subject in subjectList" :key="subject.id"
+                        style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+                        <span style="width: 80px;">{{ subject.subject }}</span>
+                        <el-input-number v-model="editForm.scores[subject.id]" :min="0" :max="subject.full_score"
+                            :step="0.5" :precision="1" size="small" />
+                        <span style="font-size: 12px; color: #999;">满分 {{ subject.full_score }}</span>
+                    </div>
                 </el-form-item>
             </el-form>
             <template #footer>
@@ -155,6 +168,8 @@ const dateRange = ref([])
 
 // 班级列表
 const classList = ref([])
+// 科目列表
+const subjectList = ref([])
 
 // 添加弹窗
 const addDialogVisible = ref(false)
@@ -183,7 +198,7 @@ const addForm = reactive({
     gender: null,
     age: '',
     class_id: '',
-    score: ''
+    scores: {}
 })
 
 // 编辑弹窗
@@ -191,10 +206,10 @@ const editDialogVisible = ref(false)
 const editForm = reactive({
     id: null,
     name: '',
-    gender: 1,
+    gender: null,
     age: 18,
     class_id: null,
-    score: 60
+    scores: {}
 })
 
 // 格式化日期
@@ -315,12 +330,65 @@ const openAddDialog = () => {
     addDialogVisible.value = true
 }
 
+// 添加弹窗 班级变化时加载科目
+const onClassChange = async (classId) => {
+    if (!classId) {
+        subjectList.value = []
+        addForm.scores = {}
+        return
+    }
+
+    try {
+        const res = await request.get(`/subjects/by-class/${classId}`)
+        if (res.data.code === 200) {
+            subjectList.value = res.data.data || []
+            // 初始化 scores 对象
+            const scores = {}
+            subjectList.value.forEach(sub => {
+                scores[sub.id] = null
+            })
+            addForm.scores = scores
+        }
+    } catch {
+        ElMessage.error('加载科目失败')
+    }
+}
+
 // 确认添加
 const confirmAdd = async () => {
     const valid = await addFormRef.value.validate().catch(() => false)
     if (!valid) return
+    // 检查所有科目分数是否都已填写
+    const allFilled = subjectList.value.every(sub => {
+        const score = addForm.scores[sub.id]
+        return score !== null && score !== '' && score !== undefined
+    })
+
+    if (!allFilled) {
+        ElMessage.warning('请填写所有科目的分数')
+        return
+    }
+    if (subjectList.value.length === 0) {
+        ElMessage.warning('该班级尚未设置科目，请先联系管理员')
+        return
+    }
+    // 组装科目分数
+    const subjectScores = Object.entries(addForm.scores)
+        .filter(([_, score]) => score !== null && score !== '')
+        .map(([subjectId, score]) => ({
+            subject_id: parseInt(subjectId),
+            score: Number(score)
+        }))
+
+    const payload = {
+        name: addForm.name,
+        gender: addForm.gender,
+        age: addForm.age,
+        class_id: addForm.class_id,
+        scores: subjectScores  // 科目分数列表
+    }
     try {
-        const res = await request.post(`/students`, addForm)
+        const res = await request.post(`/students`, payload)
         if (res.data.code === 200) {
             ElMessage.success('添加成功')
             addDialogVisible.value = false
@@ -335,28 +403,74 @@ const confirmAdd = async () => {
 // 打开编辑弹窗
 const openEditDialog = async (row) => {
     try {
+        // 1. 获取学生基本信息
         const res = await request.get(`/students/${row.id}`)
         if (res.data.code === 200) {
             const data = res.data.data
+            console.log('subjectList:', subjectList.value)
+            console.log('editForm.scores:', editForm.scores)
             editForm.id = data.id
             editForm.name = data.name
             editForm.gender = data.gender
             editForm.age = data.age
-            editForm.class_id = data.class_id  // 本来就是数字，不用转
-            editForm.score = data.score
+            editForm.class_id = data.class_id ? Number(data.class_id) : ''
+
+            // 2. 加载该班级的科目列表
+            if (editForm.class_id) {
+                const subjectRes = await request.get(`/subjects/by-class/${editForm.class_id}`)
+                if (subjectRes.data.code === 200) {
+                    const subjects = subjectRes.data.data || []
+                    // 3. 获取该学生的已有成绩
+                    const scoreRes = await request.get(`/student/${editForm.id}/scores`)
+                    const scoreMap = {}
+                    if (scoreRes.data.code === 200) {
+                        const scores = scoreRes.data.data?.scores || []
+                        scores.forEach(item => {
+                            scoreMap[item.subject_id] = item.score
+                        })
+                    }
+                    // 4. 组装 scores 对象
+                    const scores = {}
+                    subjects.forEach(sub => {
+                        scores[sub.id] = scoreMap[sub.id] ?? null
+                    })
+                    editForm.scores = scores
+                    subjectList.value = subjects
+                }
+            }
+
             editDialogVisible.value = true
         }
-    } catch {
+    } catch (error) {
         ElMessage.error('获取学生信息失败')
     }
 }
-
 // 确认编辑
 const confirmEdit = async () => {
+    const allFilled = subjectList.value.every(sub => {
+        const score = editForm.scores[sub.id]
+        return score !== null && score !== '' && score !== undefined
+    })
+    if (!allFilled) {
+        ElMessage.warning('请填写所有科目的分数')
+        return
+    }
+
+    // 组装数据
+    const subjectScores = Object.entries(editForm.scores)
+        .filter(([_, score]) => score !== null && score !== '')
+        .map(([subjectId, score]) => ({
+            subject_id: parseInt(subjectId),
+            score: score
+        }))
+
     try {
         const res = await request.put(
             `/students/${editForm.id}`,
-            editForm
+            {
+                ...editForm,//展开运算符，拆开editForm
+                scores: subjectScores  //替换editForm.scores为subjectScores
+            }
         )
         if (res.data.code === 200) {
             ElMessage.success('修改成功')
@@ -368,7 +482,6 @@ const confirmEdit = async () => {
         ElMessage.error(msg)
     }
 }
-
 // 删除
 const handleDelete = (id) => {
     ElMessageBox.confirm('确定要删除该学生吗？', '提示', {
@@ -397,6 +510,7 @@ onMounted(() => {
     loadClassList()
     loadData()
 })
+
 </script>
 
 <style scoped>

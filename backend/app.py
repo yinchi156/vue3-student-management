@@ -266,10 +266,12 @@ def get_students():
         total = cursor.fetchone()[0]
 
         sql = f"""
-                SELECT s.id, s.name, s.gender, s.age, CONCAT(c.grade, c.class) AS class_name, s.score, s.created_at
+                SELECT s.id, s.name, s.gender, s.age, CONCAT(c.grade, c.class) AS class_name, COALESCE(SUM(ss.score), 0) AS total_score, s.created_at
                 FROM students s
                 LEFT JOIN class c ON s.class_id = c.id
+                LEFT JOIN student_subjects ss ON s.id = ss.student_id
                 {where_clause}
+                GROUP BY s.id, s.name, s.gender, s.age, c.grade, c.class, s.created_at
                 ORDER BY {sort_field} {sort_order}
                 LIMIT %s OFFSET %s
             """
@@ -285,7 +287,7 @@ def get_students():
                     "gender": row[2] if row[2] is not None else "未填写",
                     "age": row[3] if row[3] else 0,
                     "class": row[4] if row[4] else "未填写",
-                    "score": row[5] if row[5] is not None else 0,
+                    "total_score": row[5] if row[5] is not None else 0,
                     "createTime": (
                         row[6].strftime("%Y-%m-%d %H:%M:%S") if row[6] else "未填写"
                     ),
@@ -315,12 +317,50 @@ def get_students():
             conn.close()
 
 
+@app.route("/api/subjects/by-class/<int:class_id>", methods=["GET"])
+def get_subjects_by_class(class_id):
+    payload = verify_token()
+    if not payload:
+        return jsonify({"code": 401, "message": "未登录"}), 401
+
+    conn = pymysql.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+
+    try:
+        # 查询该班级关联的科目 + 全校科目（class_id 为 NULL 或 0）
+        sql = """
+            SELECT s.id, s.subject, s.full_score
+            FROM subjects s
+            LEFT JOIN subject_classes sc ON s.id = sc.subjects_id
+            WHERE sc.class_id = %s OR sc.class_id IS NULL
+            GROUP BY s.id
+            ORDER BY s.id
+        """
+        cursor.execute(sql, (class_id,))
+        results = cursor.fetchall()
+
+        data = []
+        for row in results:
+            data.append({"id": row[0], "subject": row[1], "full_score": row[2]})
+
+        return jsonify({"code": 200, "data": data}), 200
+
+    except Exception as e:
+        print("❌ 查询班级科目失败：", e)
+        return jsonify({"code": 500, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
 # 学生添加接口
 @app.route("/api/students", methods=["POST"])
 def add_student():
     payload = verify_token()
     if not payload:
         return jsonify({"code": 401, "message": "未登录或登录已过期"}), 401
+    subject_map = {}
+    validated_scores = []
     try:
         # 1. 获取前端传来的数据
         data = request.get_json()
@@ -328,7 +368,7 @@ def add_student():
         gender = data.get("gender")
         age = data.get("age")
         class_id = data.get("class_id")
-        score = data.get("score")
+        scores = data.get("scores", [])
 
         # 校验姓名
         if not name or not name.strip():
@@ -351,26 +391,44 @@ def add_student():
             return jsonify({"code": 400, "message": "请选择班级"}), 400
 
         # 校验分数
-        if score is None or score == "":
-            return jsonify({"code": 400, "message": "分数不能为空"}), 400
-        try:
-            score = float(score)
-        except ValueError:
-            return jsonify({"code": 400, "message": "分数必须是数字"}), 400
+        if len(validated_scores) != len(subject_map):
+            return (
+                jsonify(
+                    {
+                        "code": 400,
+                        "message": f"请填写所有科目的分数（共 {len(subject_map)} 科）",
+                    }
+                ),
+                400,
+            )
 
         conn = pymysql.connect(**DB_CONFIG)
         cursor = conn.cursor()
 
-        sql = "INSERT INTO students (name, age, score, class_id, gender) VALUES (%s, %s, %s, %s, %s)"
-        cursor.execute(sql, (name, age, score, class_id, gender))
+        # 1. 插入学生基本信息
+        sql = """
+            INSERT INTO students (name, gender, age, class_id)
+            VALUES (%s, %s, %s, %s)
+        """
+        cursor.execute(sql, (name, gender, age, class_id))
+        student_id = cursor.lastrowid
+
+        # 2. 批量插入成绩
+        if scores:
+            score_sql = """
+                INSERT INTO student_subjects (student_id, subject_id, score)
+                VALUES (%s, %s, %s)
+            """
+            score_data = [
+                (student_id, item["subject_id"], item["score"]) for item in scores
+            ]
+            cursor.executemany(score_sql, score_data)
+
         conn.commit()
-
-        # 5. 关闭连接
-        cursor.close()
-        conn.close()
-
-        # 6. 返回成功
-        return jsonify({"code": 200, "message": "添加成功"}), 200
+        return (
+            jsonify({"code": 200, "message": "添加成功", "data": {"id": student_id}}),
+            200,
+        )
 
     except Exception as e:
         print("❌ 获取前端数据失败：", e)
@@ -453,7 +511,7 @@ def update_student(student_id):
         gender = data.get("gender")
         age = data.get("age")
         class_id = data.get("class_id")
-        score = data.get("score")
+        scores = data.get("scores", [])
         # 校验姓名
         if not name or not name.strip():
             return jsonify({"code": 400, "message": "姓名不能为空"}), 400
@@ -471,18 +529,28 @@ def update_student(student_id):
             return jsonify({"code": 400, "message": "请选择班级"}), 400
 
         # 校验分数
-        if score is None or score == "":
-            return jsonify({"code": 400, "message": "分数不能为空"}), 400
-        try:
-            score = float(score)
-        except ValueError:
-            return jsonify({"code": 400, "message": "分数必须是数字"}), 400
 
         conn = pymysql.connect(**DB_CONFIG)
         cursor = conn.cursor()
 
-        sql = "UPDATE students SET name = %s, age = %s, class_id = %s, score = %s, gender = %s WHERE id = %s"
-        cursor.execute(sql, (name, age, class_id, score, gender, student_id))
+        sql = "UPDATE students SET name = %s, age = %s, class_id = %s, gender = %s WHERE id = %s"
+        cursor.execute(sql, (name, age, class_id, gender, student_id))
+        # 2. 更新成绩（先删后插）
+        if scores:
+            # 删除旧成绩
+            cursor.execute(
+                "DELETE FROM student_subjects WHERE student_id = %s", (student_id,)
+            )
+
+            # 批量插入新成绩
+            score_sql = """
+                INSERT INTO student_subjects (student_id, subject_id, score)
+                VALUES (%s, %s, %s)
+            """
+            score_data = [
+                (student_id, item["subject_id"], item["score"]) for item in scores
+            ]
+            cursor.executemany(score_sql, score_data)
         conn.commit()
 
         cursor.close()
@@ -500,20 +568,27 @@ def delete_student(student_id):
     payload = verify_token()
     if not payload:
         return jsonify({"code": 401, "message": "未登录或登录已过期"}), 401
+
+    conn = pymysql.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+
     try:
-        conn = pymysql.connect(**DB_CONFIG)
-        cursor = conn.cursor()
+        # 1. 先删除关联的成绩数据
+        cursor.execute(
+            "DELETE FROM student_subjects WHERE student_id = %s", (student_id,)
+        )
 
-        sql = "DELETE FROM students WHERE id = %s"
-        cursor.execute(sql, (student_id,))
+        # 2. 再删除学生本体
+        cursor.execute("DELETE FROM students WHERE id = %s", (student_id,))
+
         conn.commit()
-
         cursor.close()
         conn.close()
         return jsonify({"code": 200, "message": "删除成功"}), 200
 
     except Exception as e:
-        print("❌ 删除用户数据失败：", e)
+        conn.rollback()
+        print("❌ 删除学生失败：", e)
         return jsonify({"code": 500, "message": str(e)}), 500
 
 
@@ -771,9 +846,24 @@ def delete_class(class_id):
     cursor = conn.cursor()
 
     try:
-        sql = "DELETE FROM class WHERE id = %s"
-        cursor.execute(sql, (class_id,))
-        conn.commit()
+        # 1. 删除该班级下所有学生的成绩
+        cursor.execute(
+            """
+    DELETE ss FROM student_subjects ss
+    JOIN students s ON ss.student_id = s.id
+    WHERE s.class_id = %s
+    """,
+            (class_id,),
+        )
+
+        # 2. 删除该班级下的所有学生
+        cursor.execute("DELETE FROM students WHERE class_id = %s", (class_id,))
+
+        # 3. 删除科目-班级关联
+        cursor.execute("DELETE FROM subject_classes WHERE class_id = %s", (class_id,))
+
+        # 4. 删除班级
+        cursor.execute("DELETE FROM class WHERE id = %s", (class_id,))
 
         return jsonify({"code": 200, "message": "删除成功"}), 200
 
@@ -1074,7 +1164,7 @@ def delete_subject(subject_id):
         conn.close()
 
 
-# 管理员管理表填充接口
+# 用户管理表填充接口
 @app.route("/api/users", methods=["GET"])
 def get_admins():
     payload = verify_token()
@@ -1158,7 +1248,7 @@ def get_admins():
             conn.close()
 
 
-# 管理员管理修改身份
+# 用户管理修改身份
 @app.route("/api/users/<int:user_id>/role", methods=["PUT"])
 def update_user_role(user_id):
     # 验证 Token
@@ -1217,7 +1307,7 @@ def update_user_role(user_id):
         conn.close()
 
 
-# 管理员删除用户
+# 用户管理删除用户
 @app.route("/api/users/<int:user_id>", methods=["DELETE"])
 def delete_user(user_id):
     payload = verify_token()
@@ -1262,7 +1352,7 @@ def delete_user(user_id):
         conn.close()
 
 
-# 管理员重置密码
+# 用户管理重置密码
 @app.route("/api/users/<int:user_id>/reset-password", methods=["PUT"])
 def reset_user_password(user_id):
     payload = verify_token()
@@ -1612,7 +1702,7 @@ def get_student_scores(student_id):
 
         # 获取成绩列表
         sql_scores = """
-            SELECT sub.subject, ss.score, sub.full_score
+            SELECT ss.subject_id, sub.subject, ss.score, sub.full_score
             FROM student_subjects ss
             JOIN subjects sub ON ss.subject_id = sub.id
             WHERE ss.student_id = %s
@@ -1627,7 +1717,12 @@ def get_student_scores(student_id):
                 f"{student[1]}{student[2]}班" if student[1] and student[2] else "未分配"
             ),
             "scores": [
-                {"subject": row[0], "score": row[1], "full_score": row[2]}
+                {
+                    "subject_id": row[0],
+                    "subject": row[1],
+                    "score": row[2],
+                    "full_score": row[3],
+                }
                 for row in scores
             ],
         }

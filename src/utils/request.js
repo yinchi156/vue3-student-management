@@ -7,7 +7,10 @@ import router from '../router'
 const request = axios.create({
   //这里定义了baseURL，前端代码不需要加/api
   baseURL: '/api',  // 你的后端地址
-  timeout: 10000
+  timeout: 10000,
+  headers: {
+    'Content-Type': 'application/json'  // 确保这行存在
+  }
 })
 
 // 请求拦截器：自动添加 token

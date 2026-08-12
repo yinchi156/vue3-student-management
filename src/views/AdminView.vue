@@ -27,12 +27,16 @@
             <el-aside width="200px" style="background-color: #1e293b;">
                 <el-menu :default-active="$route.path" router background-color="#1e293b" text-color="#fff"
                     active-text-color="#409eff">
-                    <el-menu-item index="/admin/students">
-                        <el-icon>
-                            <DataBoard />
-                        </el-icon>
-                        <span>学生管理</span>
-                    </el-menu-item>
+                    <el-sub-menu index="/admin/students">
+                        <template #title>
+                            <el-icon>
+                                <User />
+                            </el-icon>
+                            <span>学生管理</span>
+                        </template>
+                        <el-menu-item index="/admin/students/list">学生列表</el-menu-item>
+                        <el-menu-item index="/admin/students/statistics">数据统计</el-menu-item>
+                    </el-sub-menu>
                     <el-menu-item index="/admin/classes">
                         <el-icon>
                             <School />
@@ -67,7 +71,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { DataBoard, School, Notebook, Setting } from '@element-plus/icons-vue'
+import { User, School, Notebook, Setting } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const username = ref(localStorage.getItem('loggedInUser') || '管理员')

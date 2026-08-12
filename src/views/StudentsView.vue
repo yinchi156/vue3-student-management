@@ -9,7 +9,7 @@
                 <el-checkbox :label="0" value="0">女</el-checkbox>
             </el-checkbox-group>
             <el-select v-model="selectedFields" size="large" multiple collapse-tags collapse-tags-tooltip
-                placeholder="筛选字段" style="width: 180px;">
+                :max-collapse-tags="2" placeholder="筛选字段" style="width: 220px;">
                 <el-option label="姓名" value="name" />
                 <el-option label="班级" value="class" />
                 <el-option label="年龄" value="age" />
@@ -322,6 +322,7 @@ const updateURL = () => {
 // 重置搜索
 const resetSearch = () => {
     searchKeyword.value = ''
+    selectedFields.value = ['name',]
     genderFilter.value = []
     dateRange.value = []
     currentPage.value = 1

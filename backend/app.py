@@ -317,6 +317,72 @@ def get_students():
             conn.close()
 
 
+@app.route("/api/statistics/subject-averages", methods=["GET"])
+def get_subject_averages_by_grade():
+    payload = verify_token()
+    if not payload:
+        return jsonify({"code": 401, "message": "未登录"}), 401
+
+    conn = pymysql.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+
+    try:
+        sql = """
+            SELECT 
+                c.grade AS grade,
+                sub.subject AS subject,
+                ROUND(AVG(ss.score), 1) AS avg_score
+            FROM student_subjects ss
+            JOIN students st ON ss.student_id = st.id
+            JOIN class c ON st.class_id = c.id
+            JOIN subjects sub ON ss.subject_id = sub.id
+            WHERE ss.score IS NOT NULL
+            GROUP BY c.grade, sub.id, sub.subject
+            ORDER BY c.grade, sub.id
+        """
+        cursor.execute(sql)
+        results = cursor.fetchall()
+
+        # 组织数据结构
+        grade_map = {}
+        subjects_set = set()
+        for row in results:
+            grade = row[0]
+            subject = row[1]
+            avg_score = row[2]
+            if grade not in grade_map:
+                grade_map[grade] = {}
+            grade_map[grade][subject] = avg_score
+            subjects_set.add(subject)
+
+        subjects = sorted(list(subjects_set))
+        grades = sorted(grade_map.keys())
+
+        series = []
+        for grade in grades:
+            data = []
+            for subject in subjects:
+                data.append(grade_map[grade].get(subject, 0))
+            series.append({"name": grade, "data": data})
+
+        return (
+            jsonify(
+                {
+                    "code": 200,
+                    "data": {"subjects": subjects, "grades": grades, "series": series},
+                }
+            ),
+            200,
+        )
+
+    except Exception as e:
+        print("❌ 查询统计失败：", e)
+        return jsonify({"code": 500, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
 @app.route("/api/subjects/by-class/<int:class_id>", methods=["GET"])
 def get_subjects_by_class(class_id):
     payload = verify_token()

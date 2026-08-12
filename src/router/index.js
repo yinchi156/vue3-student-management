@@ -5,6 +5,7 @@ import StudentsView from '../views/StudentsView.vue'
 import ClassesView from '../views/ClassesView.vue'
 import SubjectsView from '../views/SubjectsView.vue'
 import UsersView from '../views/UsersView.vue'
+import StatisticsView from '../views/StatisticsView.vue'
 import TeacherLayout from '../views/teacher/TeacherLayout.vue'
 import MyClasses from '../views/teacher/MyClasses.vue'
 import ScoreEntry from '../views/teacher/ScoreEntry.vue'
@@ -26,16 +27,26 @@ const router = createRouter({
       name: 'login',
       component: LoginView
     },
-    { path: '/admin', component: AdminView,
-      meta: { roles: ['admin'] },
-      children: [
-    { path: 'students', component: StudentsView },
-    { path: 'classes', component: ClassesView },
-    { path: 'subjects', component: SubjectsView },
-    { path: 'users', component: UsersView },
-    { path: '', redirect: '/admin/students' }  // 默认显示学生管理
-  ]
-    },
+    {
+    path: '/admin',
+    component: AdminView,
+    meta: { roles: ['admin'] },
+    children: [
+        {
+            // 学生管理（父级，不直接对应组件）
+            path: 'students',
+            redirect: '/admin/students/list',
+            children: [
+                { path: 'list', component: StudentsView },
+                { path: 'statistics', component: StatisticsView }
+            ]
+        },
+        { path: 'classes', component: ClassesView },
+        { path: 'subjects', component: SubjectsView },
+        { path: 'users', component: UsersView },
+        { path: '', redirect: '/admin/students/list' }
+    ]
+},
 
     {
   path: '/teacher',

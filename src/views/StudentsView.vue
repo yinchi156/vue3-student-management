@@ -13,7 +13,6 @@
                 <el-option label="姓名" value="name" />
                 <el-option label="班级" value="class" />
                 <el-option label="年龄" value="age" />
-                <el-option label="总分" value="score" />
             </el-select>
             <el-input v-model="searchKeyword" placeholder="输入关键词搜索..." clearable style="flex: 1; min-width: 150px;"
                 size="large" @keyup.enter="handleSearch" @clear="handleSearch" />
@@ -28,9 +27,9 @@
 
         <!-- 表格 -->
         <div style="border-radius:6px; overflow: hidden;">
-            <el-table :data="studentList" stripe row-height="120"
+            <el-table ref="tableRef" :data="studentList" stripe row-height="120"
                 style="width: 100%;  font-size: 15px; margin-top: 12px;border-radius: 6px; overflow: hidden;border-bottom: 1px solid #e0e0e0;"
-                height="600" v-loading="loading" :cell-style="{ textAlign: 'left' }">
+                height="600" v-loading="loading" :cell-style="{ textAlign: 'left' }" @sort-change="handleSortChange">
                 <el-table-column prop="id" label="ID" width="80" />
                 <el-table-column prop="name" label="姓名" />
                 <el-table-column prop="gender" label="性别">
@@ -44,7 +43,8 @@
                         {{ row.class }}班
                     </template>
                 </el-table-column>
-                <el-table-column prop="total_score" label="总分" />
+                <el-table-column prop="total_score" label="总分" sortable
+                    sort-orders="['ascending', 'descending', null]" />
                 <el-table-column prop="createTime" label="创建时间">
                     <template #default="{ row }">
                         {{ formatDateTime(row.createTime) }}
@@ -165,6 +165,9 @@ const selectedFields = ref(['name',])
 const searchKeyword = ref('')
 const genderFilter = ref([])
 const dateRange = ref([])
+const tableRef = ref(null)
+const sortField = ref('id')
+const sortOrder = ref('desc')
 
 // 班级列表
 const classList = ref([])
@@ -238,11 +241,15 @@ const loadData = async () => {
             fields: selectedFields.value.length > 0 ? selectedFields.value : ['name'],
             gender: genderFilter.value.join(','),
             start_date: dateRange.value?.[0] || '',
-            end_date: dateRange.value?.[1] || ''
+            end_date: dateRange.value?.[1] || '',
+            sort_field: sortField.value,
+            sort_order: sortOrder.value
         }
+        console.log('请求参数:', params)
         const res = await request.get(`/students`, { params })
         if (res.data.code === 200) {
             studentList.value = res.data.data
+            console.log('学生数据:', studentList.value[0])
             total.value = res.data.total
 
         }
@@ -283,6 +290,18 @@ const handleSearch = () => {
 
     loadData()
 }
+const handleSortChange = ({ prop, order }) => {
+    if (order === null) {
+        // 重置为默认排序
+        sortField.value = 'id'
+        sortOrder.value = 'desc'
+    } else {
+        sortField.value = prop || 'id'
+        sortOrder.value = order === 'ascending' ? 'asc' : 'desc'
+    }
+    currentPage.value = 1
+    loadData()
+}
 
 // 统一更新 URL 的函数
 const updateURL = () => {
@@ -306,6 +325,11 @@ const resetSearch = () => {
     genderFilter.value = []
     dateRange.value = []
     currentPage.value = 1
+    sortField.value = 'id'
+    sortOrder.value = 'desc'
+    if (tableRef.value) {
+        tableRef.value.clearSort()
+    }
     loadData()
     updateURL()
 }

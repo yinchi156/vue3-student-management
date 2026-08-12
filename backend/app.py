@@ -219,7 +219,7 @@ def get_students():
     sort_order = request.args.get("sort_order", "DESC")
 
     # 验证排序字段和方向
-    allowed_fields = ["id", "name", "age", "score"]
+    allowed_fields = ["id", "name", "age", "total_score"]
     if sort_field not in allowed_fields:
         sort_field = "id"
     if sort_order.upper() not in ["ASC", "DESC"]:

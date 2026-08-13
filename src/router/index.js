@@ -4,6 +4,7 @@ import AdminView from '../views/AdminView.vue'
 import StudentsView from '../views/StudentsView.vue'
 import ClassesView from '../views/ClassesView.vue'
 import SubjectsView from '../views/SubjectsView.vue'
+import ExamsView from '../views/ExamsView.vue'
 import UsersView from '../views/UsersView.vue'
 import StatisticsView from '../views/StatisticsView.vue'
 import TeacherLayout from '../views/teacher/TeacherLayout.vue'
@@ -43,6 +44,7 @@ const router = createRouter({
         },
         { path: 'classes', component: ClassesView },
         { path: 'subjects', component: SubjectsView },
+        { path: 'exams', component: ExamsView },
         { path: 'users', component: UsersView },
         { path: '', redirect: '/admin/students/list' }
     ]

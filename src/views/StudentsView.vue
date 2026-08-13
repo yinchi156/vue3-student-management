@@ -14,13 +14,16 @@
                 <el-option label="班级" value="class" />
                 <el-option label="年龄" value="age" />
             </el-select>
-            <el-input v-model="searchKeyword" placeholder="输入关键词搜索..." clearable style="flex: 1; min-width: 150px;"
+            <el-input v-model="searchKeyword" placeholder="输入关键词查询..." clearable style="flex: 1; min-width: 150px;"
                 size="large" @keyup.enter="handleSearch" @clear="handleSearch" />
-
             <el-date-picker v-model="dateRange" size="large" type="daterange" range-separator="至"
                 start-placeholder="开始日期" end-placeholder="结束日期" value-format="YYYY-MM-DD" style="max-width: 220px;" />
+            <el-select v-model="currentExamId" @change="handleExamChange" placeholder="选择考试" size="large"
+                style="flex: none; width: 150px;">
+                <el-option v-for="exam in examList" :key="exam.id" :label="exam.name" :value="exam.id" />
+            </el-select>
 
-            <el-button type="primary" @click="handleSearch">搜索</el-button>
+            <el-button type="primary" @click="handleSearch">查询</el-button>
             <el-button @click="resetSearch">重置</el-button>
             <el-button type="success" @click="openAddDialog">添加学生</el-button>
         </div>
@@ -87,8 +90,13 @@
                             :value="cls.id" />
                     </el-select>
                 </el-form-item>
+                <el-form-item label="考试" v-if="addForm.class_id">
+                    <el-select v-model="addForm.exam_id" placeholder="请选择考试" @change="onExamChange">
+                        <el-option v-for="exam in examList" :key="exam.id" :label="exam.name" :value="exam.id" />
+                    </el-select>
+                </el-form-item>
                 <!-- 科目分数：只有在选择了班级后才显示 -->
-                <el-form-item v-if="addForm.class_id" label="科目分数">
+                <el-form-item v-if="addForm.exam_id" label="科目分数">
                     <div v-for="subject in subjectList" :key="subject.id"
                         style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
                         <span style="width: 80px;">{{ subject.subject }}</span>
@@ -125,6 +133,11 @@
                             :value="cls.id" />
                     </el-select>
                 </el-form-item>
+                <el-form-item label="考试">
+                    <el-select v-model="editForm.exam_id" placeholder="请选择考试" @change="onEditExamChange">
+                        <el-option v-for="exam in examList" :key="exam.id" :label="exam.name" :value="exam.id" />
+                    </el-select>
+                </el-form-item>
                 <el-form-item v-if="editForm.class_id" label="科目分数">
                     <div v-for="subject in subjectList" :key="subject.id"
                         style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
@@ -149,6 +162,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import request from '@/utils/request'
+import { number } from 'echarts'
 
 // 表格数据
 const studentList = ref([])
@@ -168,6 +182,8 @@ const dateRange = ref([])
 const tableRef = ref(null)
 const sortField = ref('id')
 const sortOrder = ref('desc')
+const currentExamId = ref(null)
+const examList = ref([])
 
 // 班级列表
 const classList = ref([])
@@ -199,8 +215,9 @@ const addRules = {
 const addForm = reactive({
     name: '',
     gender: null,
-    age: '',
+    age: null,
     class_id: '',
+    exam_id: '',
     scores: {}
 })
 
@@ -210,8 +227,9 @@ const editForm = reactive({
     id: null,
     name: '',
     gender: null,
-    age: 18,
+    age: null,
     class_id: null,
+    exam_id: null,
     scores: {}
 })
 
@@ -237,6 +255,7 @@ const loadData = async () => {
         const params = {
             page: currentPage.value,
             limit: pageSize.value,
+            exam_id: currentExamId.value || null,
             search: searchKeyword.value,
             fields: selectedFields.value.length > 0 ? selectedFields.value : ['name'],
             gender: genderFilter.value.join(','),
@@ -245,11 +264,12 @@ const loadData = async () => {
             sort_field: sortField.value,
             sort_order: sortOrder.value
         }
+        console.log('性别筛选值:', genderFilter.value)
         console.log('请求参数:', params)
         const res = await request.get(`/students`, { params })
         if (res.data.code === 200) {
             studentList.value = res.data.data
-            console.log('学生数据:', studentList.value[0])
+            console.log('返回数据:', studentList.value)
             total.value = res.data.total
 
         }
@@ -270,6 +290,31 @@ const loadClassList = async () => {
     } catch {
         // 忽略班级加载失败
     }
+}
+const loadExamList = async () => {
+    try {
+        const res = await request.get('/exams')
+        if (res.data.code === 200) {
+            examList.value = res.data.data || []
+            // 默认选中最近一次考试（列表按 id 倒序，第一条就是最新的）
+            if (examList.value.length > 0) {
+                currentExamId.value = examList.value[0].id
+            } else {
+                currentExamId.value = 0  // 没有考试时，设为 0
+            }
+            // 加载考试列表后刷新数据
+            loadData()
+        }
+    } catch {
+        console.log('加载考试列表失败')
+    }
+}
+
+const handleExamChange = (examId) => {
+    currentExamId.value = examId
+    currentPage.value = 1
+    updateURL()
+    loadData()
 }
 
 //男女筛选搜索
@@ -352,12 +397,14 @@ const handlePageSizeChange = (size) => {
 // 打开添加弹窗
 const openAddDialog = () => {
     addFormRef.value?.resetFields()
+    addForm.exam_id = ''
     addDialogVisible.value = true
 }
 
 // 添加弹窗 班级变化时加载科目
 const onClassChange = async (classId) => {
     if (!classId) {
+        addForm.exam_id = ''
         subjectList.value = []
         addForm.scores = {}
         return
@@ -432,8 +479,6 @@ const openEditDialog = async (row) => {
         const res = await request.get(`/students/${row.id}`)
         if (res.data.code === 200) {
             const data = res.data.data
-            console.log('subjectList:', subjectList.value)
-            console.log('editForm.scores:', editForm.scores)
             editForm.id = data.id
             editForm.name = data.name
             editForm.gender = data.gender
@@ -444,30 +489,74 @@ const openEditDialog = async (row) => {
             if (editForm.class_id) {
                 const subjectRes = await request.get(`/subjects/by-class/${editForm.class_id}`)
                 if (subjectRes.data.code === 200) {
-                    const subjects = subjectRes.data.data || []
-                    // 3. 获取该学生的已有成绩
-                    const scoreRes = await request.get(`/student/${editForm.id}/scores`)
-                    const scoreMap = {}
-                    if (scoreRes.data.code === 200) {
-                        const scores = scoreRes.data.data?.scores || []
-                        scores.forEach(item => {
-                            scoreMap[item.subject_id] = item.score
-                        })
-                    }
-                    // 4. 组装 scores 对象
-                    const scores = {}
-                    subjects.forEach(sub => {
-                        scores[sub.id] = scoreMap[sub.id] ?? null
-                    })
-                    editForm.scores = scores
-                    subjectList.value = subjects
+                    subjectList.value = subjectRes.data.data || []
                 }
+            }
+
+            // 3. 关键：直接用当前列表选中的考试 ID
+            // 如果当前没有选中任何考试（exam_id = 0），则取最近一次考试
+            let examId = currentExamId.value
+            if (!examId || examId === 0) {
+                // 如果当前没有选中考试，取最近一次考试作为默认
+                const examRes = await request.get('/exams')
+                if (examRes.data.code === 200 && examRes.data.data.length > 0) {
+                    examId = examRes.data.data[0].id
+                }
+            }
+
+            editForm.exam_id = examId
+
+            // 4. 加载该考试下的分数
+            if (examId) {
+                const scoreRes = await request.get(`/student/${editForm.id}/scores?exam_id=${examId}`)
+                if (scoreRes.data.code === 200) {
+                    const scores = scoreRes.data.data?.scores || []
+                    const scoresObj = {}
+                    scores.forEach(item => {
+                        scoresObj[item.subject_id] = item.score
+                    })
+                    // 合并到 editForm.scores，没有分数的科目显示 null
+                    subjectList.value.forEach(sub => {
+                        editForm.scores[sub.id] = scoresObj[sub.id] ?? null
+                    })
+                }
+            } else {
+                // 没有考试时，清空分数
+                subjectList.value.forEach(sub => {
+                    editForm.scores[sub.id] = null
+                })
             }
 
             editDialogVisible.value = true
         }
     } catch (error) {
+        console.error('获取学生信息失败', error)
         ElMessage.error('获取学生信息失败')
+    }
+}
+
+const onEditExamChange = async (examId) => {
+    if (!examId) {
+        subjectList.value.forEach(sub => {
+            editForm.scores[sub.id] = null
+        })
+        return
+    }
+
+    try {
+        const scoreRes = await request.get(`/student/${editForm.id}/scores?exam_id=${examId}`)
+        if (scoreRes.data.code === 200) {
+            const scores = scoreRes.data.data?.scores || []
+            const scoresObj = {}
+            scores.forEach(item => {
+                scoresObj[item.subject_id] = item.score
+            })
+            subjectList.value.forEach(sub => {
+                editForm.scores[sub.id] = scoresObj[sub.id] ?? null
+            })
+        }
+    } catch {
+        ElMessage.error('加载考试成绩失败')
     }
 }
 // 确认编辑
@@ -533,6 +622,7 @@ onMounted(() => {
     dateRange.value = route.query.start_date && route.query.end_date ? [route.query.start_date, route.query.end_date] : []
     currentPage.value = Number(route.query.page) || 1
     loadClassList()
+    loadExamList()
     loadData()
 })
 

@@ -210,6 +210,7 @@ def get_students():
     page = request.args.get("page", 1, type=int)
     limit = request.args.get("limit", 10, type=int)
     offset = (page - 1) * limit
+    exam_id = request.args.get("exam_id", type=int)
     search = request.args.get("search", "")
     fields = request.args.getlist("fields[]")
     gender = request.args.get("gender", "")
@@ -228,13 +229,15 @@ def get_students():
     print("排序字段:", sort_field, "排序方向:", sort_order)
     print("搜索关键词:", search)
     print("收到的 fields 列表:", fields)
+    print("gender 参数值:", gender)
+    print("gender 参数类型:", type(gender))
 
     conn = None
     cursor = None
     try:
         conn = pymysql.connect(**DB_CONFIG)
         cursor = conn.cursor()
-        # 2. 构建 WHERE 条件
+        # 2. 构建 WHERE 条件 用一个列表来存储搜索条件，扩展性更强
         where_conditions = []
         params = []
 
@@ -270,12 +273,15 @@ def get_students():
                 FROM students s
                 LEFT JOIN class c ON s.class_id = c.id
                 LEFT JOIN student_subjects ss ON s.id = ss.student_id
+                    AND ss.exam_id = %s
                 {where_clause}
                 GROUP BY s.id, s.name, s.gender, s.age, c.grade, c.class, s.created_at
                 ORDER BY {sort_field} {sort_order}
                 LIMIT %s OFFSET %s
             """
-        cursor.execute(sql, params + [limit, offset])
+        print("SQL:", sql)
+        print("params:", params + [exam_id, limit, offset])
+        cursor.execute(sql, [exam_id] + params + [limit, offset])
         results = cursor.fetchall()
 
         students = []
@@ -377,6 +383,58 @@ def get_subject_averages_by_grade():
 
     except Exception as e:
         print("❌ 查询统计失败：", e)
+        return jsonify({"code": 500, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.route("/api/statistics/grade-level-distribution", methods=["GET"])
+def get_grade_level_distribution():
+    payload = verify_token()
+    if not payload:
+        return jsonify({"code": 401, "message": "未登录"}), 401
+
+    conn = pymysql.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+
+    try:
+        # 计算每个学生的平均分，再按等级分组
+        sql = """
+            SELECT 
+                CASE
+                    WHEN avg_ratio >= 0.9 THEN '优秀'
+                    WHEN avg_ratio >= 0.8 THEN '良好'
+                    WHEN avg_ratio >= 0.6 THEN '及格'
+                    ELSE '不及格'
+                END AS level,
+                COUNT(*) AS count
+            FROM (
+                SELECT ss.student_id, AVG(ss.score / sub.full_score) AS avg_ratio
+                FROM student_subjects ss
+                JOIN subjects sub ON ss.subject_id = sub.id
+                GROUP BY ss.student_id
+            ) AS student_avg
+            GROUP BY level
+            ORDER BY 
+                CASE level
+                    WHEN '优秀' THEN 1
+                    WHEN '良好' THEN 2
+                    WHEN '及格' THEN 3
+                    ELSE 4
+                END
+        """
+        cursor.execute(sql)
+        results = cursor.fetchall()
+
+        data = []
+        for row in results:
+            data.append({"name": row[0], "value": row[1]})
+
+        return jsonify({"code": 200, "data": data}), 200
+
+    except Exception as e:
+        print("❌ 查询等级分布失败：", e)
         return jsonify({"code": 500, "message": str(e)}), 500
     finally:
         cursor.close()
@@ -1230,6 +1288,98 @@ def delete_subject(subject_id):
         conn.close()
 
 
+# 获取考试列表
+@app.route("/api/exams", methods=["GET"])
+def get_exams():
+    payload = verify_token()
+    if not payload:
+        return jsonify({"code": 401, "message": "未登录"}), 401
+
+    conn = pymysql.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id, name, created_at FROM exams ORDER BY id DESC")
+        results = cursor.fetchall()
+        data = []
+        for row in results:
+            data.append(
+                {
+                    "id": row[0],
+                    "name": row[1],
+                    "created_at": (
+                        row[2].strftime("%Y-%m-%d %H:%M:%S") if row[2] else None
+                    ),
+                }
+            )
+        return jsonify({"code": 200, "data": data}), 200
+    except Exception as e:
+        print("❌ 查询考试列表失败：", e)
+        return jsonify({"code": 500, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# 添加考试
+@app.route("/api/exams", methods=["POST"])
+def add_exam():
+    payload = verify_token()
+    if not payload:
+        return jsonify({"code": 401, "message": "未登录"}), 401
+
+    data = request.get_json()
+    name = data.get("name")
+    if not name or not name.strip():
+        return jsonify({"code": 400, "message": "考试名称不能为空"}), 400
+
+    conn = pymysql.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("INSERT INTO exams (name) VALUES (%s)", (name.strip(),))
+        conn.commit()
+        return jsonify({"code": 200, "message": "添加成功"}), 200
+    except Exception as e:
+        print("❌ 添加考试失败：", e)
+        return jsonify({"code": 500, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# 删除考试
+@app.route("/api/exams/<int:exam_id>", methods=["DELETE"])
+def delete_exam(exam_id):
+    payload = verify_token()
+    if not payload:
+        return jsonify({"code": 401, "message": "未登录"}), 401
+
+    conn = pymysql.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    try:
+        # 检查是否有成绩关联
+        cursor.execute(
+            "SELECT COUNT(*) FROM student_subjects WHERE exam_id = %s", (exam_id,)
+        )
+        count = cursor.fetchone()[0]
+        if count > 0:
+            return (
+                jsonify(
+                    {"code": 400, "message": f"该考试已有 {count} 条成绩记录，无法删除"}
+                ),
+                400,
+            )
+
+        cursor.execute("DELETE FROM exams WHERE id = %s", (exam_id,))
+        conn.commit()
+        return jsonify({"code": 200, "message": "删除成功"}), 200
+    except Exception as e:
+        print("❌ 删除考试失败：", e)
+        return jsonify({"code": 500, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
 # 用户管理表填充接口
 @app.route("/api/users", methods=["GET"])
 def get_admins():
@@ -1750,6 +1900,9 @@ def get_student_scores(student_id):
     if not payload:
         return jsonify({"code": 401, "message": "未登录"}), 401
 
+    # 获取 exam_id 参数
+    exam_id = request.args.get("exam_id", type=int)
+
     conn = pymysql.connect(**DB_CONFIG)
     cursor = conn.cursor()
 
@@ -1766,15 +1919,22 @@ def get_student_scores(student_id):
         if not student:
             return jsonify({"code": 404, "message": "学生不存在"}), 404
 
-        # 获取成绩列表
+        # 获取成绩列表（支持按考试过滤）
         sql_scores = """
             SELECT ss.subject_id, sub.subject, ss.score, sub.full_score
             FROM student_subjects ss
             JOIN subjects sub ON ss.subject_id = sub.id
             WHERE ss.student_id = %s
-            ORDER BY sub.subject
         """
-        cursor.execute(sql_scores, (student_id,))
+        params = [student_id]
+
+        if exam_id:
+            sql_scores += " AND ss.exam_id = %s"
+            params.append(exam_id)
+
+        sql_scores += " ORDER BY sub.subject"
+
+        cursor.execute(sql_scores, params)
         scores = cursor.fetchall()
 
         data = {

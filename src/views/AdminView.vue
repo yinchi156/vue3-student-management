@@ -49,6 +49,12 @@
                         </el-icon>
                         <span>科目管理</span>
                     </el-menu-item>
+                    <el-menu-item index="/admin/exams">
+                        <el-icon>
+                            <EditPen />
+                        </el-icon>
+                        <span>考试管理</span>
+                    </el-menu-item>
                     <el-menu-item index="/admin/users">
                         <el-icon>
                             <Setting />
@@ -71,7 +77,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { User, School, Notebook, Setting } from '@element-plus/icons-vue'
+import { User, School, Notebook, Setting, EditPen } from '@element-plus/icons-vue'
 
 const router = useRouter()
 const username = ref(localStorage.getItem('loggedInUser') || '管理员')

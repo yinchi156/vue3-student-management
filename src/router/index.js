@@ -9,6 +9,7 @@ import UsersView from '../views/UsersView.vue'
 import StatisticsView from '../views/StatisticsView.vue'
 import TeacherLayout from '../views/teacher/TeacherLayout.vue'
 import MyClasses from '../views/teacher/MyClasses.vue'
+import StudentDashboard from '../views/teacher/StudentDashboard.vue'
 import ScoreEntry from '../views/teacher/ScoreEntry.vue'
 import ScoreView from '../views/teacher/ScoreView.vue'
 import StudentView from '../views/student/StudentView.vue'
@@ -57,6 +58,7 @@ const router = createRouter({
   children: [
     { path: '', redirect: '/teacher/classes' },
     { path: 'classes', component: MyClasses },
+    { path: 'students', component: StudentDashboard },
     { path: 'score-entry', component: ScoreEntry },
     { path: 'score-view', component: ScoreView }
   ]

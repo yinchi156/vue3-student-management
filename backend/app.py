@@ -1690,26 +1690,68 @@ def get_students_by_class(class_id):
     if not payload:
         return jsonify({"code": 401, "message": "未登录"}), 401
 
+    exam_id = request.args.get("exam_id", type=int)
+
     conn = pymysql.connect(**DB_CONFIG)
     cursor = conn.cursor()
 
-    sql = "SELECT id, name, gender, age, score FROM students WHERE class_id = %s ORDER BY name"
-    cursor.execute(sql, (class_id,))
-    results = cursor.fetchall()
+    try:
+        if exam_id:
+            sql = """
+                SELECT 
+                    s.id, 
+                    s.name,
+                    s.gender,
+                    s.age,
+                    sub.id AS subject_id,
+                    sub.subject,
+                    ss.score,
+                    sub.full_score
+                FROM students s
+                LEFT JOIN student_subjects ss ON s.id = ss.student_id AND ss.exam_id = %s
+                LEFT JOIN subjects sub ON ss.subject_id = sub.id
+                WHERE s.class_id = %s
+                ORDER BY s.name, sub.id
+            """
+            cursor.execute(sql, (exam_id, class_id))
+            results = cursor.fetchall()
 
-    data = []
-    for row in results:
-        data.append(
-            {
-                "id": row[0],
-                "name": row[1],
-                "gender": row[2],
-                "age": row[3],
-                "score": row[4],
-            }
-        )
+            # 按学生分组
+            students_map = {}
+            for row in results:
+                student_id = row[0]
+                if student_id not in students_map:
+                    students_map[student_id] = {
+                        "id": student_id,
+                        "name": row[1],
+                        "gender": row[2],
+                        "age": row[3],
+                        "scores": [],
+                    }
+                if row[4]:  # 如果有科目
+                    students_map[student_id]["scores"].append(
+                        {
+                            "subject_id": row[4],
+                            "subject": row[5],
+                            "score": row[6],
+                            "full_score": row[7],
+                        }
+                    )
+            data = list(students_map.values())
+        else:
+            sql = "SELECT id, name FROM students WHERE class_id = %s ORDER BY name"
+            cursor.execute(sql, (class_id,))
+            results = cursor.fetchall()
+            data = [{"id": row[0], "name": row[1], "scores": []} for row in results]
 
-    return jsonify({"code": 200, "data": data}), 200
+        return jsonify({"code": 200, "data": data}), 200
+
+    except Exception as e:
+        print("❌ 查询班级学生失败：", e)
+        return jsonify({"code": 500, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
 
 
 # 科目接口
@@ -1744,7 +1786,7 @@ def get_subject_options():
         conn.close()
 
 
-# 成绩录入
+# 成绩录入/修改
 @app.route("/api/scores/batch", methods=["POST"])
 def batch_save_scores():
     payload = verify_token()
@@ -1756,18 +1798,14 @@ def batch_save_scores():
 
     data = request.get_json()
     class_id = data.get("class_id")
-    subject_id = data.get("subject_id")
+    exam_id = data.get("exam_id")
     scores = data.get("scores", [])
 
-    # 校验班级
+    # 校验
     if not class_id:
         return jsonify({"code": 400, "message": "请选择班级"}), 400
-
-    # 校验科目
-    if not subject_id:
-        return jsonify({"code": 400, "message": "请选择科目"}), 400
-
-    # 校验成绩列表
+    if not exam_id:
+        return jsonify({"code": 400, "message": "请选择考试"}), 400
     if not scores:
         return jsonify({"code": 400, "message": "成绩列表不能为空"}), 400
 
@@ -1775,14 +1813,24 @@ def batch_save_scores():
     cursor = conn.cursor()
 
     try:
-        # 先删除该班级该科目的旧成绩（覆盖更新）
-        sql_delete = "DELETE FROM student_subjects WHERE student_id IN (SELECT id FROM students WHERE class_id = %s) AND subject_id = %s"
-        cursor.execute(sql_delete, (class_id, subject_id))
+        # 先删除该班级该考试的所有旧成绩
+        sql_delete = """
+            DELETE ss FROM student_subjects ss
+            JOIN students s ON ss.student_id = s.id
+            WHERE s.class_id = %s AND ss.exam_id = %s
+        """
+        cursor.execute(sql_delete, (class_id, exam_id))
 
         # 批量插入新成绩
-        sql_insert = "INSERT INTO student_subjects (student_id, subject_id, score) VALUES (%s, %s, %s)"
+        sql_insert = """
+            INSERT INTO student_subjects (student_id, subject_id, score, exam_id)
+            VALUES (%s, %s, %s, %s)
+        """
         for item in scores:
-            cursor.execute(sql_insert, (item["student_id"], subject_id, item["score"]))
+            cursor.execute(
+                sql_insert,
+                (item["student_id"], item["subject_id"], item["score"], exam_id),
+            )
 
         conn.commit()
         return jsonify({"code": 200, "message": f"成功保存 {len(scores)} 条成绩"}), 200

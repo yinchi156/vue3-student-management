@@ -325,6 +325,7 @@ const handleGenderFilterChange = (val) => {
         genderFilter.value = [val[val.length - 1]]//数组取后一个
     }
     currentPage.value = 1
+    updateURL()
     loadData()
 }
 
@@ -332,7 +333,7 @@ const handleGenderFilterChange = (val) => {
 const handleSearch = () => {
 
     currentPage.value = 1
-
+    updateURL()
     loadData()
 }
 const handleSortChange = ({ prop, order }) => {

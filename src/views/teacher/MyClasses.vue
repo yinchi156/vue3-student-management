@@ -69,17 +69,9 @@ const loadMyClasses = async () => {
     }
 }
 
-// 查看学生
-const viewStudents = async (classId) => {
-    try {
-        const res = await request.get(`/students/by-class/${classId}`)
-        if (res.data.code === 200) {
-            studentList.value = res.data.data || []
-            studentDialogVisible.value = true
-        }
-    } catch {
-        ElMessage.error('加载学生列表失败')
-    }
+
+const viewStudents = (classId) => {
+    router.push(`/teacher/students?classId=${classId}`)
 }
 
 // 跳转到成绩录入（带班级参数）

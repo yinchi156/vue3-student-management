@@ -1,56 +1,66 @@
 <template>
-    <div>
-        <div class="page-title">📊 成绩查看</div>
+    <div class="class-students">
+        <div class="page-header">
+            <h2>📋 班级学生列表</h2>
+            <el-button type="default" @click="goBack">
+                <el-icon>
+                    <ArrowLeft />
+                </el-icon> 返回
+            </el-button>
+        </div>
+
+        <!-- 筛选条件 -->
         <div class="content-card">
-            <!-- 筛选条件 -->
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;">
-                <el-select v-model="selectedClass" placeholder="选择班级" style="width: 150px;" @change="onClassChange">
+            <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+                <el-select v-model="selectedClass" placeholder="选择班级" style="width: 180px;" @change="onClassChange">
                     <el-option v-for="cls in classList" :key="cls.id" :label="cls.grade + cls.class + '班'"
                         :value="cls.id" />
                 </el-select>
-                <el-select v-model="selectedExam" placeholder="选择考试" style="width: 150px;">
+                <el-select v-model="selectedExam" placeholder="选择考试" style="width: 180px;" @change="onExamChange">
                     <el-option v-for="exam in examList" :key="exam.id" :label="exam.name" :value="exam.id" />
                 </el-select>
-                <el-button type="primary" @click="queryScores">查询</el-button>
+                <el-button type="primary" @click="loadStudents">查询</el-button>
             </div>
+        </div>
 
-            <!-- 成绩表格 -->
-            <div v-if="students.length === 0" class="empty-tip">
-                请选择班级和考试，点击「查询」
-            </div>
-            <el-table v-else :data="students" border stripe v-loading="loading" style="width: 100%;">
-                <!-- 姓名 -->
-                <el-table-column prop="name" label="姓名" width="100" fixed />
-                <!-- 总分（排第一） -->
-                <el-table-column label="总分" width="100">
+        <!-- 学生列表 -->
+        <div class="content-card" style="margin-top: 16px;">
+            <div v-if="loading" class="empty-tip">⏳ 加载中...</div>
+            <div v-else-if="students.length === 0" class="empty-tip">暂无学生数据</div>
+            <el-table v-else :data="students" stripe style="width: 100%;">
+                <el-table-column prop="id" label="序号" width="60" />
+                <el-table-column prop="name" label="姓名" width="80" />
+                <el-table-column prop="gender" label="性别" width="70">
                     <template #default="{ row }">
-                        {{ row.total_score !== undefined && row.total_score !== null ? row.total_score : '-' }}
+                        {{ row.gender === 1 ? '男' : '女' }}
                     </template>
                 </el-table-column>
-                <!-- 各科分数 -->
-                <el-table-column v-for="subject in subjectList" :key="subject.id" :label="subject.subject" width="120">
+                <el-table-column prop="age" label="年龄" width="70" />
+                <el-table-column v-for="subject in subjectList" :key="subject.id" :label="subject.subject" width="100">
                     <template #default="{ row }">
-                        {{ row.scores && row.scores[subject.id] !== undefined && row.scores[subject.id] !== null ? row.scores[subject.id] : '-' }}
+                        {{ row.scores?.[subject.id] ?? '-' }}
+                    </template>
+                </el-table-column>
+                <el-table-column label="总分" width="100" fixed="right">
+                    <template #default="{ row }">
+                        {{ row.total_score ?? '-' }}
                     </template>
                 </el-table-column>
             </el-table>
-
-            <!-- 统计信息 -->
-            <div v-if="students.length > 0"
-                style="margin-top: 20px; background: #f8fafc; padding: 16px; border-radius: 8px; display: flex; flex-wrap: wrap; gap: 20px;">
-                <div><strong>学生人数：</strong>{{ students.length }}</div>
-                <div><strong>平均总分：</strong>{{ stats.avg_total || '-' }}</div>
-                <div><strong>最高总分：</strong>{{ stats.max_total || '-' }}</div>
-                <div><strong>最低总分：</strong>{{ stats.min_total || '-' }}</div>
-            </div>
         </div>
     </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import request from '@/utils/request'
+import { useRoute } from 'vue-router'
+
+const router = useRouter()
+const route = useRoute()
 
 const classList = ref([])
 const examList = ref([])
@@ -60,19 +70,10 @@ const selectedExam = ref('')
 const students = ref([])
 const loading = ref(false)
 
-// 统计信息（计算属性）
-const stats = computed(() => {
-    if (students.value.length === 0) {
-        return { avg_total: '-', max_total: '-', min_total: '-' }
-    }
-    const totals = students.value.map(s => s.total_score || 0)
-    const sum = totals.reduce((a, b) => a + b, 0)
-    return {
-        avg_total: (sum / totals.length).toFixed(1),
-        max_total: Math.max(...totals),
-        min_total: Math.min(...totals)
-    }
-})
+// 返回
+const goBack = () => {
+    router.back()
+}
 
 // 加载教师的班级列表
 const loadClassList = async () => {
@@ -80,9 +81,16 @@ const loadClassList = async () => {
         const res = await request.get('/teacher/classes')
         if (res.data.code === 200) {
             classList.value = res.data.data || []
+            const classIdFromUrl = route.query.classId
+            if (classIdFromUrl) {
+                selectedClass.value = Number(classIdFromUrl)
+                await onClassChange(selectedClass.value)
+                await loadExamList()
+                await loadStudents()
+            }
         }
-    } catch {
-        ElMessage.error('加载班级列表失败')
+    } catch (error) {
+        console.error('错误发生在哪里:', error)
     }
 }
 
@@ -92,6 +100,9 @@ const loadExamList = async () => {
         const res = await request.get('/exams')
         if (res.data.code === 200) {
             examList.value = res.data.data || []
+            if (examList.value.length > 0) {
+                selectedExam.value = examList.value[0].id
+            }
         }
     } catch {
         ElMessage.error('加载考试列表失败')
@@ -114,14 +125,21 @@ const onClassChange = async (classId) => {
     }
 }
 
-// 查询成绩
-const queryScores = async () => {
+// 切换考试
+const onExamChange = () => {
+    if (selectedClass.value && selectedExam.value) {
+        loadStudents()
+    }
+}
+
+// 加载学生数据
+const loadStudents = async () => {
     if (!selectedClass.value) {
-        ElMessage.warning('请先选择班级')
+        ElMessage.warning('请选择班级')
         return
     }
     if (!selectedExam.value) {
-        ElMessage.warning('请先选择考试')
+        ElMessage.warning('请选择考试')
         return
     }
 
@@ -144,9 +162,9 @@ const queryScores = async () => {
                     }
                 })
                 return {
-                    ...student,
+                    ...student,  // 保留 id, name, gender, age 等字段
                     scores: scores,
-                    total_score: total  // 前端计算总分
+                    total_score: total
                 }
             })
         } else {
@@ -154,7 +172,7 @@ const queryScores = async () => {
             students.value = []
         }
     } catch {
-        ElMessage.error('查询失败')
+        ElMessage.error('加载学生数据失败')
         students.value = []
     } finally {
         loading.value = false
@@ -168,17 +186,27 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.page-title {
-    font-size: 20px;
-    font-weight: 600;
-    color: #1e2a3a;
+.class-students {
+    padding: 20px;
+}
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 20px;
+}
+
+.page-header h2 {
+    font-size: 20px;
+    color: #1e2a3a;
+    margin: 0;
 }
 
 .content-card {
     background: white;
     border-radius: 12px;
-    padding: 24px;
+    padding: 20px 24px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 

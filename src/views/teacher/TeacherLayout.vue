@@ -40,6 +40,7 @@ const username = ref(localStorage.getItem('loggedInUser') || '教师')
 
 const menus = [
     { path: '/teacher/classes', label: '我的班级', icon: '📋' },
+    { path: '/teacher/students', label: '学生查看', icon: '👥' },
     { path: '/teacher/score-entry', label: '成绩录入', icon: '✏️' },
     { path: '/teacher/score-view', label: '成绩查看', icon: '📊' }
 ]

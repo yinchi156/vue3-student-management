@@ -1,9 +1,14 @@
 <template>
     <div class="statistics-container">
-        <h2>📊 各科平均分统计</h2>
+        <h2>📊 数据统计</h2>
         <div class="chart-wrapper">
-            <div ref="chartRef" style="width: 30%; height: 300px;"></div>
-            <div ref="pieChartRef" style="width: 30%; height: 300px;"></div>
+            <!-- 第一行：柱状图 + 饼图 -->
+            <div class="chart-row">
+                <div ref="chartRef" class="chart-box"></div>
+                <div ref="pieChartRef" class="chart-box"></div>
+            </div>
+            <!-- 第二行：折线图（全宽） -->
+            <div ref="trendChartRef" class="chart-box full-width"></div>
         </div>
     </div>
 </template>
@@ -16,8 +21,11 @@ import * as echarts from 'echarts'
 
 const chartRef = ref(null)
 const pieChartRef = ref(null)
+const trendChartRef = ref(null)
+
 let chartInstance = null
 let pieChartInstance = null
+let trendChartInstance = null
 
 // 加载数据并渲染图表
 const loadStatistics = async () => {
@@ -48,6 +56,21 @@ const loadGradeDistribution = async () => {
     }
 }
 
+const loadTrendData = async () => {
+    try {
+        const res = await request.get('/statistics/avg-trend')
+        if (res.data.code === 200) {
+            const data = res.data.data
+            renderTrendChart(data)
+        } else {
+            ElMessage.error(res.data.message || '加载失败')
+        }
+    } catch (error) {
+        console.error('获取趋势数据失败:', error)
+        ElMessage.error('获取趋势数据失败')
+    }
+}
+
 // 渲染柱状图
 const renderChart = (data) => {
     if (!chartRef.value) return
@@ -71,37 +94,35 @@ const renderChart = (data) => {
         grid: {
             left: '10%',
             right: '10%',
-            bottom: '1%',
+            bottom: '10%',
             top: '30%',
             containLabel: true
         },
         xAxis: {
             type: 'category',
             data: data.subjects,
-            axisLabel: { fontSize: 14 }
+            axisLabel: { fontSize: 13 }
         },
         yAxis: {
             type: 'value',
             min: 0,
             max: 100,
-            axisLabel: { fontSize: 14 },
+            axisLabel: { fontSize: 13 },
             splitLine: { lineStyle: { type: 'dashed' } }
         },
-        series: data.series.map((item, index) => ({
+        series: data.series.map((item) => ({
             name: item.name,
             type: 'bar',
             data: item.data,
-            barWidth: '20%',
+            barWidth: '25%',
 
         }))
     }
 
     chartInstance.setOption(option)
-
-    // 窗口大小变化时自适应
-    window.addEventListener('resize', handleResize)
 }
 
+// 渲染饼图
 const renderPieChart = (data) => {
     if (!pieChartRef.value) return
     if (pieChartInstance) pieChartInstance.dispose()
@@ -120,30 +141,28 @@ const renderPieChart = (data) => {
         legend: {
             orient: 'vertical',
             left: 'left',
-            top: 'center',
-            itemGap: 40
+            top: 'center'
         },
         series: [
             {
-                name: '等级分布',   // 系列名称（在 tooltip 中显示）
-                type: 'pie',        // 图表类型：饼图
-                radius: ['40%', '70%'],  // 内径 40%，外径 70%（形成环形图）
-                avoidLabelOverlap: false, // 标签不自动避让重叠
+                name: '等级分布',
+                type: 'pie',
+                radius: ['40%', '70%'],
+                avoidLabelOverlap: false,
                 itemStyle: {
-                    borderRadius: 10,     // 扇形块圆角
-                    borderColor: '#fff',  // 边框颜色（白色）
-                    borderWidth: 2        // 边框宽度
+                    borderRadius: 10,
+                    borderColor: '#fff',
+                    borderWidth: 2
                 },
                 label: {
-                    show: true,           // 显示标签
-                    formatter: '{b}\n{d}%',// 显示：等级名称 + 百分比（换行）
-
+                    show: true,
+                    formatter: '{b}\n{d}%'
                 },
                 emphasis: {
                     label: {
-                        show: true,       // 悬停时显示标签
-                        fontSize: 16,     // 悬停时放大字号
-                        fontWeight: 'bold' // 悬停时加粗
+                        show: true,
+                        fontSize: 16,
+                        fontWeight: 'bold'
                     }
                 },
                 data: data
@@ -154,21 +173,98 @@ const renderPieChart = (data) => {
     pieChartInstance.setOption(option)
 }
 
-const handleResize = () => {
-    if (chartInstance) {
-        chartInstance.resize()
+// 渲染折线图
+const renderTrendChart = (data) => {
+    if (!trendChartRef.value) return
+    if (trendChartInstance) trendChartInstance.dispose()
+
+    trendChartInstance = echarts.init(trendChartRef.value)
+
+    const option = {
+        title: {
+            text: '班级平均分趋势',
+            left: 'center'
+        },
+        tooltip: {
+            trigger: 'axis',
+            formatter: (params) => {
+                const p = params[0]
+                return `${p.name}<br/>平均分：${p.value} 分`
+            }
+        },
+        grid: {
+            left: '8%',
+            right: '8%',
+            bottom: '15%',
+            top: '20%',
+            containLabel: true
+        },
+        xAxis: {
+            type: 'category',
+            data: data.exams,
+            axisLabel: { fontSize: 13 }
+        },
+        yAxis: {
+            type: 'value',
+            min: 0,
+            max: data.max_score || 100,
+            axisLabel: {
+                fontSize: 13,
+                formatter: '{value} 分'
+            },
+            splitLine: { lineStyle: { type: 'dashed' } }
+        },
+        series: [
+            {
+                name: '平均分',
+                type: 'line',
+                data: data.avg_scores,
+                smooth: true,
+                symbol: 'circle',
+                symbolSize: 8,
+                lineStyle: {
+                    width: 3,
+                    color: '#409eff'
+                },
+                areaStyle: {
+                    color: {
+                        type: 'linear',
+                        x: 0,
+                        y: 0,
+                        x2: 0,
+                        y2: 1,
+                        colorStops: [
+                            { offset: 0, color: 'rgba(64, 158, 255, 0.3)' },
+                            { offset: 1, color: 'rgba(64, 158, 255, 0.05)' }
+                        ]
+                    }
+                },
+
+            }
+        ]
     }
+
+    trendChartInstance.setOption(option)
+}
+
+// 窗口大小变化自适应
+const handleResize = () => {
+    if (chartInstance) chartInstance.resize()
+    if (pieChartInstance) pieChartInstance.resize()
+    if (trendChartInstance) trendChartInstance.resize()
 }
 
 onMounted(() => {
     loadStatistics()
     loadGradeDistribution()
+    loadTrendData()
+    window.addEventListener('resize', handleResize)
 })
 
 onUnmounted(() => {
-    if (chartInstance) {
-        chartInstance.dispose()
-    }
+    if (chartInstance) chartInstance.dispose()
+    if (pieChartInstance) pieChartInstance.dispose()
+    if (trendChartInstance) trendChartInstance.dispose()
     window.removeEventListener('resize', handleResize)
 })
 </script>
@@ -186,7 +282,25 @@ onUnmounted(() => {
 
 .chart-wrapper {
     background: white;
-    padding: 8px;
+    padding: 16px;
     border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.chart-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.chart-box {
+    flex: 1;
+    height: 300px;
+    min-width: 0;
+}
+
+.full-width {
+    width: 100%;
+    height: 350px;
 }
 </style>

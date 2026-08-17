@@ -6,6 +6,7 @@
                 style="flex: 1; min-width: 150px;" @keyup.enter="handleSearch" @clear="handleSearch" />
             <el-button type="primary" @click="handleSearch">搜索</el-button>
             <el-button @click="resetSearch">重置</el-button>
+            <el-button type="success" @click="openAddDialog">添加教师</el-button>
         </div>
 
         <!-- 表格 -->
@@ -45,11 +46,46 @@
                 :page-sizes="[10, 20, 50]" layout="total, sizes, prev, pager, next" @size-change="handlePageSizeChange"
                 @current-change="handlePageChange" />
         </div>
+
+        <!-- 添加教师弹窗 -->
+        <el-dialog v-model="addDialogVisible" title="添加教师" width="500px">
+            <el-form :model="addForm" label-width="100px">
+                <!-- 教师姓名 -->
+                <el-form-item label="教师姓名">
+                    <el-input v-model="addForm.username" placeholder="请输入教师姓名" />
+                </el-form-item>
+
+                <!-- 所教班级（多选） -->
+                <el-form-item label="所教班级">
+                    <el-select v-model="addForm.class_ids" multiple collapse-tags collapse-tags-tooltip
+                        placeholder="请选择班级" style="width: 100%;">
+                        <el-option v-for="cls in classList" :key="cls.id" :label="cls.grade + cls.class + '班'"
+                            :value="cls.id" />
+                    </el-select>
+                </el-form-item>
+
+                <!-- 所教科目（单选） -->
+                <el-form-item label="所教科目">
+                    <el-select v-model="addForm.subject_id" placeholder="请选择科目" style="width: 100%;">
+                        <el-option v-for="sub in subjectList" :key="sub.id" :label="sub.subject" :value="sub.id" />
+                    </el-select>
+                </el-form-item>
+
+                <!-- 是否为班主任（开关） -->
+                <el-form-item label="是否为班主任">
+                    <el-switch v-model="addForm.is_class_teacher" active-text="是" inactive-text="否" />
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="addDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="confirmAdd">确认</el-button>
+            </template>
+        </el-dialog>
     </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/utils/request'
 
@@ -63,12 +99,28 @@ const loading = ref(false)
 // 搜索
 const searchKeyword = ref('')
 
+// 弹窗控制
+const addDialogVisible = ref(false)
+
 // 角色映射
 const roleMap = {
     user: '学生',
     teacher: '教师',
     admin: '管理员'
 }
+
+const addForm = reactive({
+    username: '',
+    class_ids: [],      // 多选，数组
+    subject_id: null,   // 单选
+    is_class_teacher: false
+})
+
+// 班级列表
+const classList = ref([])
+
+// 科目列表
+const subjectList = ref([])
 
 // 加载数据
 const loadData = async () => {
@@ -90,6 +142,76 @@ const loadData = async () => {
         loading.value = false
     }
 }
+
+// 加载班级列表
+const loadClassList = async () => {
+    try {
+        const res = await request.get('/classes/options')
+        if (res.data.code === 200) {
+            classList.value = res.data.data || []
+        }
+    } catch {
+        ElMessage.error('加载班级列表失败')
+    }
+}
+
+// 加载科目列表
+const loadSubjectList = async () => {
+    try {
+        const res = await request.get('/subjects/options')
+        if (res.data.code === 200) {
+            subjectList.value = res.data.data || []
+        }
+    } catch {
+        ElMessage.error('加载科目列表失败')
+    }
+}
+
+
+// 打开弹窗
+const openAddDialog = () => {
+    addForm.username = ''
+    addForm.class_ids = []
+    addForm.subject_id = null
+    addForm.is_class_teacher = false
+    addDialogVisible.value = true
+}
+
+// 确认添加
+const confirmAdd = async () => {
+    if (!addForm.username.trim()) {
+        ElMessage.warning('请输入教师姓名')
+        return
+    }
+    if (addForm.class_ids.length === 0) {
+        ElMessage.warning('请至少选择一个班级')
+        return
+    }
+    if (!addForm.subject_id) {
+        ElMessage.warning('请选择所教科目')
+        return
+    }
+
+    try {
+        const res = await request.post('/teachers', {
+            username: addForm.username.trim(),
+            class_ids: addForm.class_ids,
+            subject_id: addForm.subject_id,
+            is_class_teacher: addForm.is_class_teacher ? 1 : 0
+        })
+        if (res.data.code === 200) {
+            ElMessage.success('添加成功')
+            addDialogVisible.value = false
+            loadData()  // 刷新教师列表
+        } else {
+            ElMessage.error(res.data.message || '添加失败')
+        }
+    } catch (error) {
+        const msg = error.response?.data?.message || '添加失败'
+        ElMessage.error(msg)
+    }
+}
+
 
 // 搜索
 const handleSearch = () => {
@@ -205,6 +327,8 @@ const handleDelete = (row) => {
 
 // 初始化
 onMounted(() => {
+    loadClassList()
+    loadSubjectList()
     loadData()
 })
 </script>

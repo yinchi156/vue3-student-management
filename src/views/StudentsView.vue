@@ -458,6 +458,7 @@ const confirmAdd = async () => {
         gender: addForm.gender,
         age: addForm.age,
         class_id: addForm.class_id,
+        exam_id: addForm.exam_id,
         scores: subjectScores  // 科目分数列表
     }
     try {

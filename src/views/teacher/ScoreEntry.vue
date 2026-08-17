@@ -19,7 +19,7 @@
             <div v-if="students.length === 0" class="empty-tip">
                 请选择班级和考试，点击「加载学生」
             </div>
-            <el-table v-else :data="students" border stripe v-loading="loading" style="width: 100%;">
+            <el-table v-else :data="students" max-height="500" stripe v-loading="loading" style="width: 100%;">
                 <!-- 姓名 -->
                 <el-table-column prop="name" label="姓名" width="100" fixed />
                 <!-- 总分 -->

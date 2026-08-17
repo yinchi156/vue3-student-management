@@ -441,6 +441,57 @@ def get_grade_level_distribution():
         conn.close()
 
 
+@app.route("/api/statistics/avg-trend", methods=["GET"])
+def get_avg_trend():
+    payload = verify_token()
+    if not payload:
+        return jsonify({"code": 401, "message": "未登录"}), 401
+
+    conn = pymysql.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("SELECT SUM(full_score) FROM subjects")
+        total_full_score = cursor.fetchone()[0] or 0
+
+        sql = """
+            SELECT 
+                e.id AS exam_id,
+                e.name AS exam_name,
+                ROUND(AVG(student_total.total_score), 1) AS avg_score
+            FROM exams e
+            JOIN (
+                SELECT 
+                    ss.exam_id,
+                    ss.student_id,
+                    ROUND(SUM(ss.score), 1) AS total_score
+                FROM student_subjects ss
+                JOIN students s ON ss.student_id = s.id
+                GROUP BY ss.exam_id, ss.student_id
+            ) AS student_total ON e.id = student_total.exam_id
+            GROUP BY e.id, e.name
+            ORDER BY e.id
+        """
+        cursor.execute(
+            sql,
+        )
+        results = cursor.fetchall()
+
+        data = {"exams": [], "avg_scores": [], "max_score": total_full_score}
+        for row in results:
+            data["exams"].append(row[1])  # 考试名称
+            data["avg_scores"].append(row[2])  # 平均分
+
+        return jsonify({"code": 200, "data": data}), 200
+
+    except Exception as e:
+        print("❌ 查询平均分趋势失败：", e)
+        return jsonify({"code": 500, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
 @app.route("/api/subjects/by-class/<int:class_id>", methods=["GET"])
 def get_subjects_by_class(class_id):
     payload = verify_token()
@@ -483,15 +534,14 @@ def add_student():
     payload = verify_token()
     if not payload:
         return jsonify({"code": 401, "message": "未登录或登录已过期"}), 401
-    subject_map = {}
-    validated_scores = []
+
     try:
-        # 1. 获取前端传来的数据
         data = request.get_json()
         name = data.get("name")
         gender = data.get("gender")
         age = data.get("age")
         class_id = data.get("class_id")
+        exam_id = data.get("exam_id")
         scores = data.get("scores", [])
 
         # 校验姓名
@@ -514,22 +564,58 @@ def add_student():
         if not class_id:
             return jsonify({"code": 400, "message": "请选择班级"}), 400
 
-        # 校验分数
-        if len(validated_scores) != len(subject_map):
-            return (
-                jsonify(
-                    {
-                        "code": 400,
-                        "message": f"请填写所有科目的分数（共 {len(subject_map)} 科）",
-                    }
-                ),
-                400,
-            )
-
         conn = pymysql.connect(**DB_CONFIG)
         cursor = conn.cursor()
 
-        # 1. 插入学生基本信息
+        # 1. 获取该班级的科目列表（用于校验分数）
+        subject_sql = """
+            SELECT s.id, s.full_score
+            FROM subjects s
+            LEFT JOIN subject_classes sc ON s.id = sc.subjects_id
+            WHERE sc.class_id = %s OR sc.class_id IS NULL
+        """
+        cursor.execute(subject_sql, (class_id,))
+        subject_list = cursor.fetchall()
+        subject_map = {row[0]: row[1] for row in subject_list}
+
+        # 2. 校验分数（只校验有分数的科目，空值跳过）
+        validated_scores = []
+        for item in scores:
+            subject_id = item.get("subject_id")
+            score = item.get("score")
+
+            # 跳过空值
+            if score is None or score == "":
+                continue
+
+            # 校验科目是否属于该班级
+            if subject_id not in subject_map:
+                return (
+                    jsonify(
+                        {"code": 400, "message": f"科目 {subject_id} 不属于该班级"}
+                    ),
+                    400,
+                )
+
+            # 校验分数是否为数字
+            try:
+                score = float(score)
+            except (ValueError, TypeError):
+                return jsonify({"code": 400, "message": "分数必须是数字"}), 400
+
+            # 校验分数是否在有效范围内
+            full_score = subject_map[subject_id]
+            if score < 0 or score > full_score:
+                return (
+                    jsonify(
+                        {"code": 400, "message": f"分数必须在 0 到 {full_score} 之间"}
+                    ),
+                    400,
+                )
+
+            validated_scores.append({"subject_id": subject_id, "score": score})
+
+        # 3. 插入学生基本信息
         sql = """
             INSERT INTO students (name, gender, age, class_id)
             VALUES (%s, %s, %s, %s)
@@ -537,25 +623,28 @@ def add_student():
         cursor.execute(sql, (name, gender, age, class_id))
         student_id = cursor.lastrowid
 
-        # 2. 批量插入成绩
-        if scores:
+        # 4. 批量插入成绩（只插入有分数的科目）
+        if validated_scores:
             score_sql = """
-                INSERT INTO student_subjects (student_id, subject_id, score)
-                VALUES (%s, %s, %s)
+                INSERT INTO student_subjects (student_id, subject_id, score, exam_id)
+                VALUES (%s, %s, %s, %s)
             """
             score_data = [
-                (student_id, item["subject_id"], item["score"]) for item in scores
+                (student_id, item["subject_id"], item["score"], exam_id)
+                for item in validated_scores
             ]
             cursor.executemany(score_sql, score_data)
 
         conn.commit()
+        cursor.close()
+        conn.close()
         return (
             jsonify({"code": 200, "message": "添加成功", "data": {"id": student_id}}),
             200,
         )
 
     except Exception as e:
-        print("❌ 获取前端数据失败：", e)
+        print("❌ 添加学生失败：", e)
         return jsonify({"code": 500, "message": str(e)}), 500
 
 
@@ -629,12 +718,15 @@ def update_student(student_id):
     payload = verify_token()
     if not payload:
         return jsonify({"code": 401, "message": "未登录或登录已过期"}), 401
+    conn = None
+    cursor = None
     try:
         data = request.get_json()
         name = data.get("name")
         gender = data.get("gender")
         age = data.get("age")
         class_id = data.get("class_id")
+        exam_id = data.get("exam_id")
         scores = data.get("scores", [])
         # 校验姓名
         if not name or not name.strip():
@@ -651,39 +743,101 @@ def update_student(student_id):
         # 校验班级
         if not class_id:  # 前端直接传的是数字，直接判断是否为None或空即可
             return jsonify({"code": 400, "message": "请选择班级"}), 400
-
-        # 校验分数
-
+        if not exam_id:
+            return jsonify({"code": 400, "message": "请选择考试"}), 400
         conn = pymysql.connect(**DB_CONFIG)
         cursor = conn.cursor()
+
+        # 1. 获取该班级的科目列表（用于校验分数）
+        subject_sql = """
+            SELECT s.id, s.full_score
+            FROM subjects s
+            LEFT JOIN subject_classes sc ON s.id = sc.subjects_id
+            WHERE sc.class_id = %s OR sc.class_id IS NULL
+        """
+        cursor.execute(subject_sql, (class_id,))
+        subject_list = cursor.fetchall()
+        subject_map = {row[0]: row[1] for row in subject_list}
+
+        # 2. 校验分数（只校验有分数的科目，空值跳过）
+        validated_scores = []
+        for item in scores:
+            subject_id = item.get("subject_id")
+            score = item.get("score")
+
+            # 跳过空值
+            if score is None or score == "":
+                continue
+            try:
+                subject_id = int(subject_id)
+            except (ValueError, TypeError):
+                return jsonify({"code": 400, "message": "科目ID格式错误"}), 400
+
+            # 校验科目是否属于该班级
+            if subject_id not in subject_map:
+                return (
+                    jsonify(
+                        {"code": 400, "message": f"科目 {subject_id} 不属于该班级"}
+                    ),
+                    400,
+                )
+
+            # 校验分数是否为数字
+            try:
+                score = float(score)
+            except (ValueError, TypeError):
+                return jsonify({"code": 400, "message": "分数必须是数字"}), 400
+
+            # 校验分数是否在有效范围内
+            full_score = subject_map[subject_id]
+            if score < 0 or score > full_score:
+                return (
+                    jsonify(
+                        {"code": 400, "message": f"分数必须在 0 到 {full_score} 之间"}
+                    ),
+                    400,
+                )
+
+            validated_scores.append({"subject_id": subject_id, "score": score})
+
+        # 不需要校验是否所有科目都已填写
+        # 只插入 validated_scores 里的数据
 
         sql = "UPDATE students SET name = %s, age = %s, class_id = %s, gender = %s WHERE id = %s"
         cursor.execute(sql, (name, age, class_id, gender, student_id))
         # 2. 更新成绩（先删后插）
-        if scores:
+        if validated_scores:
             # 删除旧成绩
-            cursor.execute(
-                "DELETE FROM student_subjects WHERE student_id = %s", (student_id,)
+            cursor.execute(  # 删除条件：
+                "DELETE FROM student_subjects WHERE student_id = %s AND exam_id = %s",
+                (student_id, exam_id),
             )
 
             # 批量插入新成绩
             score_sql = """
-                INSERT INTO student_subjects (student_id, subject_id, score)
-                VALUES (%s, %s, %s)
+                INSERT INTO student_subjects (student_id, subject_id, score, exam_id)
+                VALUES (%s, %s, %s, %s)
             """
             score_data = [
-                (student_id, item["subject_id"], item["score"]) for item in scores
+                (student_id, item["subject_id"], item["score"], exam_id)
+                for item in validated_scores
             ]
             cursor.executemany(score_sql, score_data)
         conn.commit()
 
-        cursor.close()
-        conn.close()
         return jsonify({"code": 200, "message": "更新成功"}), 200
 
     except Exception as e:
+        if conn:
+            conn.rollback()
         print("❌ 更新用户数据失败：", e)
         return jsonify({"code": 500, "message": str(e)}), 500
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.close()
 
 
 # 学生删除接口
@@ -1298,22 +1452,83 @@ def get_exams():
     conn = pymysql.connect(**DB_CONFIG)
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, name, created_at FROM exams ORDER BY id DESC")
+        sql = """
+            SELECT 
+                e.id,
+                e.name,
+                e.created_at,
+                COALESCE((
+                    SELECT COUNT(DISTINCT ss.student_id) 
+                    FROM student_subjects ss 
+                    WHERE ss.exam_id = e.id
+                ), 0) AS student_count,
+                COALESCE((
+                    SELECT SUM(full_score) FROM subjects
+                ), 0) AS total_full_score,
+                GROUP_CONCAT(DISTINCT u.username SEPARATOR '、') AS teacher_names,
+                GROUP_CONCAT(DISTINCT u.id SEPARATOR ',') AS teacher_ids
+            FROM exams e
+            LEFT JOIN teachers_exams te ON e.id = te.exam_id
+            LEFT JOIN users u ON te.teacher_id = u.id AND u.role = 'teacher'
+            GROUP BY e.id, e.name, e.created_at
+            ORDER BY e.id DESC
+        """
+        cursor.execute(sql)
         results = cursor.fetchall()
+
         data = []
         for row in results:
             data.append(
                 {
                     "id": row[0],
                     "name": row[1],
-                    "created_at": (
-                        row[2].strftime("%Y-%m-%d %H:%M:%S") if row[2] else None
-                    ),
+                    "created_at": row[2],
+                    "student_count": row[3],
+                    "total_full_score": row[4],
+                    "teacher_names": row[5] if row[5] else "",
+                    "teacher_ids": row[6].split(",") if row[6] else [],
                 }
             )
+
         return jsonify({"code": 200, "data": data}), 200
     except Exception as e:
         print("❌ 查询考试列表失败：", e)
+        return jsonify({"code": 500, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# 获取教师列表绑定考试
+@app.route("/api/loadteachers", methods=["GET"])
+def load_teachers():
+    payload = verify_token()
+    if not payload:
+        return jsonify({"code": 401, "message": "未登录"}), 401
+
+    conn = pymysql.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+
+    try:
+        sql = """
+            SELECT id, username, role
+            FROM users
+            WHERE role = 'teacher'
+        """
+
+        cursor.execute(
+            sql,
+        )
+        results = cursor.fetchall()
+
+        data = []
+        for row in results:
+            data.append({"id": row[0], "username": row[1], "role": row[2]})
+
+        return jsonify({"code": 200, "data": data}), 200
+
+    except Exception as e:
+        print("❌ 搜索教师失败：", e)
         return jsonify({"code": 500, "message": str(e)}), 500
     finally:
         cursor.close()
@@ -1329,8 +1544,11 @@ def add_exam():
 
     data = request.get_json()
     name = data.get("name")
+    teachers = data.get("teachers")
     if not name or not name.strip():
         return jsonify({"code": 400, "message": "考试名称不能为空"}), 400
+    if not teachers:
+        return jsonify({"code": 400, "message": "请选择监考老师"}), 400
 
     conn = pymysql.connect(**DB_CONFIG)
     cursor = conn.cursor()
@@ -1341,6 +1559,53 @@ def add_exam():
     except Exception as e:
         print("❌ 添加考试失败：", e)
         return jsonify({"code": 500, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# 修改考试
+@app.route("/api/exams/<int:exam_id>", methods=["PUT"])
+def update_exams(exam_id):
+    payload = verify_token()
+    if not payload:
+        return jsonify({"code": 401, "message": "未登录"}), 401
+
+    data = request.get_json()
+    name = data.get("name")
+    teachers = data.get("teachers", [])
+    print(name)
+
+    # 校验
+    if name is None or not name.strip():
+        return jsonify({"code": 400, "message": "考试名称不能为空"}), 400
+    if teachers is None:
+        return jsonify({"code": 400, "message": "请选择监考员"}), 400
+
+    conn = pymysql.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+
+    try:
+        # 2. 更新中间表（先删后增）
+        # 删除旧关联
+        cursor.execute("DELETE FROM teachers_exams WHERE exam_id = %s", (exam_id,))
+
+        # 插入新关联
+        for t_id in teachers:
+            if t_id:  # 过滤空值
+                cursor.execute(
+                    "INSERT INTO teachers_exams (teacher_id, exam_id) VALUES (%s, %s)",
+                    (t_id, exam_id),
+                )
+
+        conn.commit()
+        return jsonify({"code": 200, "message": "更新成功"}), 200
+
+    except Exception as e:
+        print("❌ 修改考试失败：", e)
+        conn.rollback()
+        return jsonify({"code": 500, "message": str(e)}), 500
+
     finally:
         cursor.close()
         conn.close()
@@ -1523,6 +1788,66 @@ def update_user_role(user_id):
         conn.close()
 
 
+@app.route("/api/teachers", methods=["POST"])
+def add_teacher():
+    payload = verify_token()
+    if not payload:
+        return jsonify({"code": 401, "message": "未登录"}), 401
+
+    data = request.get_json()
+    username = data.get("username")
+    class_ids = data.get("class_ids", [])
+    subject_id = data.get("subject_id")
+    is_class_teacher = data.get("is_class_teacher", 0)
+
+    if not username or not username.strip():
+        return jsonify({"code": 400, "message": "教师姓名不能为空"}), 400
+    if not class_ids:
+        return jsonify({"code": 400, "message": "请选择所教班级"}), 400
+    if not subject_id:
+        return jsonify({"code": 400, "message": "请选择所教科目"}), 400
+
+    conn = pymysql.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+
+    try:
+        # 检查用户名是否已存在
+        cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+        if cursor.fetchone():
+            return jsonify({"code": 400, "message": "该教师已存在"}), 400
+
+        # 插入用户（角色为 teacher）
+        cursor.execute(
+            "INSERT INTO users (username,password, role, is_class_teacher) VALUES (%s, '123456', 'teacher', %s)",
+            (username, is_class_teacher),
+        )
+        user_id = cursor.lastrowid
+
+        # 插入教师-班级关联
+        for class_id in class_ids:
+            cursor.execute(
+                "INSERT INTO teacher_classes (teacher_id, class_id) VALUES (%s, %s)",
+                (user_id, class_id),
+            )
+
+        # 插入教师-科目关联
+        cursor.execute(
+            "INSERT INTO teacher_subjects (teacher_id, subject_id) VALUES (%s, %s)",
+            (user_id, subject_id),
+        )
+
+        conn.commit()
+        return jsonify({"code": 200, "message": "添加成功"}), 200
+
+    except Exception as e:
+        conn.rollback()
+        print("❌ 添加教师失败：", e)
+        return jsonify({"code": 500, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
 # 用户管理删除用户
 @app.route("/api/users/<int:user_id>", methods=["DELETE"])
 def delete_user(user_id):
@@ -1544,15 +1869,31 @@ def delete_user(user_id):
 
     try:
         # 检查用户是否存在
-        cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
-        if not cursor.fetchone():
+        cursor.execute("SELECT id, role FROM users WHERE id = %s", (user_id,))
+        user = cursor.fetchone()
+        if not user:
             return jsonify({"code": 404, "message": "用户不存在"}), 404
 
-        # 删除用户（如果有其他表关联，需要先清理）
-        # 如果有关联表，先删除关联数据（如 student_subjects 等）
-        # cursor.execute("DELETE FROM student_subjects WHERE student_id = %s", (user_id,))
+        role = user[1]
 
-        # 删除用户
+        # 根据角色删除关联数据
+        if role == "teacher":
+            # 删除教师-科目关联
+            cursor.execute(
+                "DELETE FROM teacher_subjects WHERE teacher_id = %s", (user_id,)
+            )
+            # 删除教师-班级关联
+            cursor.execute(
+                "DELETE FROM teacher_classes WHERE teacher_id = %s", (user_id,)
+            )
+
+        elif role == "student":
+            # 删除学生的成绩关联
+            cursor.execute(
+                "DELETE FROM student_subjects WHERE student_id = %s", (user_id,)
+            )
+
+        # 删除用户本身
         cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
         conn.commit()
 

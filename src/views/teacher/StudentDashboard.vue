@@ -187,14 +187,14 @@ onMounted(() => {
 
 <style scoped>
 .class-students {
-    padding: 20px;
+    padding: 0px;
 }
 
 .page-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
+    margin-bottom: 6px;
 }
 
 .page-header h2 {

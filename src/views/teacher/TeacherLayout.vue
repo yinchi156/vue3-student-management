@@ -105,7 +105,7 @@ const handleLogout = () => {
     border-right: 1px solid #e4e7ed;
     padding: 16px 0;
     flex-shrink: 0;
-    overflow-y: auto;
+    overflow: hidden;
 }
 
 .nav-item {
@@ -137,6 +137,6 @@ const handleLogout = () => {
 .content-area {
     flex: 1;
     padding: 24px;
-    overflow-y: auto;
+    overflow: hidden;
 }
 </style>

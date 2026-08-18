@@ -14,22 +14,21 @@
             style="width: 100%;  font-size: 15px; margin-top: 12px;border-radius: 6px; overflow: hidden;border-bottom: 1px solid #e0e0e0;"
             height="600" v-loading="loading" :cell-style="{ textAlign: 'left' }">
             <el-table-column prop="id" label="ID" width="80" />
-            <el-table-column prop="username" label="用户名" />
-            <el-table-column label="身份">
+            <el-table-column prop="username" label="姓名" />
+            <el-table-column prop="role" label="身份" width="100">
                 <template #default="{ row }">
-                    <el-tag :type="row.role === 'admin' ? 'danger' : row.role === 'teacher' ? 'warning' : 'info'">
-                        {{ roleMap[row.role] || row.role }}
-                    </el-tag>
+                    <span v-if="row.role === 'teacher' && row.is_class_teacher === 1">班主任</span>
+                    <span v-else-if="row.role === 'teacher'">教师</span>
+                    <span v-else>{{ row.role }}</span>
                 </template>
             </el-table-column>
+            <el-table-column prop="subjects" label="任课科目" />
+            <el-table-column prop="classes" label="所授班级" />
             <el-table-column label="操作" fixed="right">
                 <template #default="{ row }">
-                    <el-select v-model="row.role" size="small" style="width: 90px; margin-right: 8px;"
-                        @change="handleRoleChange(row)">
-                        <el-option label="学生" value="user" />
-                        <el-option label="教师" value="teacher" />
-                        <el-option label="管理员" value="admin" />
-                    </el-select>
+                    <el-button size="small" type="primary" @click="openEditDialog(row)">
+                        编辑
+                    </el-button>
                     <el-button size="small" type="warning" @click="handleResetPassword(row)">
                         重置密码
                     </el-button>
@@ -81,6 +80,42 @@
                 <el-button type="primary" @click="confirmAdd">确认</el-button>
             </template>
         </el-dialog>
+
+        <!-- 编辑教师弹窗 -->
+        <el-dialog v-model="editDialogVisible" title="添加教师" width="500px">
+            <el-form :model="editForm" label-width="100px">
+                <!-- 教师姓名 -->
+                <el-form-item label="教师姓名">
+                    <el-input v-model="editForm.username" placeholder="请输入教师姓名" />
+                </el-form-item>
+
+                <!-- 所教班级（多选） -->
+                <el-form-item label="所教班级">
+                    <el-select v-model="editForm.class_ids" multiple collapse-tags collapse-tags-tooltip
+                        placeholder="请选择班级" style="width: 100%;">
+                        <el-option v-for="cls in classList" :key="cls.id" :label="cls.grade + cls.class + '班'"
+                            :value="cls.id" />
+                    </el-select>
+                </el-form-item>
+
+                <!-- 所教科目（单选） -->
+                <el-form-item label="所教科目">
+                    <el-select v-model="editForm.subject_id" placeholder="请选择科目" style="width: 100%;">
+                        <el-option v-for="sub in subjectList" :key="sub.id" :label="sub.subject" :value="sub.id" />
+                    </el-select>
+                </el-form-item>
+
+                <!-- 是否为班主任（开关） -->
+                <el-form-item label="是否为班主任">
+                    <el-switch v-model="editForm.is_class_teacher" active-text="是" inactive-text="否" :active-value="1"
+                        :inactive-value="0" />
+                </el-form-item>
+            </el-form>
+            <template #footer>
+                <el-button @click="editDialogVisible = false">取消</el-button>
+                <el-button type="primary" @click="confirmedit">确认</el-button>
+            </template>
+        </el-dialog>
     </div>
 </template>
 
@@ -88,6 +123,8 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '@/utils/request'
+import { number } from 'echarts'
+import { id } from 'element-plus/es/locales.mjs'
 
 // 表格数据
 const userList = ref([])
@@ -96,11 +133,13 @@ const currentPage = ref(1)
 const pageSize = ref(10)
 const loading = ref(false)
 
+
 // 搜索
 const searchKeyword = ref('')
 
 // 弹窗控制
 const addDialogVisible = ref(false)
+const editDialogVisible = ref(false)
 
 // 角色映射
 const roleMap = {
@@ -110,6 +149,14 @@ const roleMap = {
 }
 
 const addForm = reactive({
+    username: '',
+    class_ids: [],      // 多选，数组
+    subject_id: null,   // 单选
+    is_class_teacher: false
+})
+
+const editForm = reactive({
+    id: null,
     username: '',
     class_ids: [],      // 多选，数组
     subject_id: null,   // 单选
@@ -208,6 +255,54 @@ const confirmAdd = async () => {
         }
     } catch (error) {
         const msg = error.response?.data?.message || '添加失败'
+        ElMessage.error(msg)
+    }
+}
+
+const openEditDialog = async (row) => {
+    const res = await request.get(`/users/${row.id}`)
+    const data = res.data.data
+    editForm.id = data.id
+    editForm.username = data.username
+    editForm.class_ids = data.class_ids   // [1, 2, 3]
+    editForm.subject_id = Number(data.subject_ids[0]) //后端返回的是数组
+    editForm.is_class_teacher = data.is_class_teacher
+    editDialogVisible.value = true
+}
+
+const confirmedit = async () => {
+    // 校验
+    if (!editForm.username.trim()) {
+        ElMessage.warning('请输入教师姓名')
+        return
+    }
+    if (editForm.class_ids.length === 0) {
+        ElMessage.warning('请至少选择一个班级')
+        return
+    }
+    if (!editForm.subject_id) {
+        ElMessage.warning('请选择所教科目')
+        return
+    }
+
+    try {
+        const payload = {
+            username: editForm.username.trim(),
+            is_class_teacher: editForm.is_class_teacher ? 1 : 0,
+            subject_ids: editForm.subject_id ? [editForm.subject_id] : [],  // 单值转数组
+            class_ids: editForm.class_ids  // 已经是数组
+        }
+
+        const res = await request.put(`/users/${editForm.id}`, payload)
+        if (res.data.code === 200) {
+            ElMessage.success('修改成功')
+            editDialogVisible.value = false
+            loadData()  // 刷新列表
+        } else {
+            ElMessage.error(res.data.message || '修改失败')
+        }
+    } catch (error) {
+        const msg = error.response?.data?.message || '修改失败'
         ElMessage.error(msg)
     }
 }

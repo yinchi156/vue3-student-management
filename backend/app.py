@@ -1647,45 +1647,76 @@ def delete_exam(exam_id):
 
 # 用户管理表填充接口
 @app.route("/api/users", methods=["GET"])
-def get_admins():
+def get_users():
     payload = verify_token()
     if not payload:
         return jsonify({"code": 401, "message": "未登录或登录已过期"}), 401
 
+    # 只有管理员可以查看教师列表
+    if payload.get("role") != "admin":
+        return jsonify({"code": 403, "message": "权限不足"}), 403
+
     page = request.args.get("page", 1, type=int)
     limit = request.args.get("limit", 10, type=int)
     offset = (page - 1) * limit
-    search = request.args.get("search", "").strip()
+    search = request.args.get("search", "")
 
-    conn = None
-    cursor = None
+    conn = pymysql.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+
     try:
-        conn = pymysql.connect(**DB_CONFIG)
-        cursor = conn.cursor()
-
-        # 构造查询条件
+        # 构造查询条件（只查教师）
         if search:
-            sql_count = "SELECT COUNT(*) FROM users WHERE username LIKE %s"
+            sql_count = """
+                SELECT COUNT(*) 
+                FROM users 
+                WHERE role = 'teacher' AND username LIKE %s
+            """
             cursor.execute(sql_count, ("%" + search + "%",))
             total = cursor.fetchone()[0]
 
             sql = """
-                SELECT id, username, role, created_at
-                FROM users
-                WHERE username LIKE %s
-                ORDER BY id DESC
+                SELECT 
+                    u.id, 
+                    u.username, 
+                    u.role, 
+                    u.is_class_teacher,
+                    u.created_at,
+                    GROUP_CONCAT(DISTINCT s.subject SEPARATOR '、') AS subjects,
+                    GROUP_CONCAT(DISTINCT CONCAT(c.grade, c.class, '班') SEPARATOR '、') AS classes
+                FROM users u
+                LEFT JOIN teacher_subjects ts ON u.id = ts.teacher_id
+                LEFT JOIN subjects s ON ts.subject_id = s.id
+                LEFT JOIN teacher_classes tc ON u.id = tc.teacher_id
+                LEFT JOIN class c ON tc.class_id = c.id
+                WHERE u.role = 'teacher' AND u.username LIKE %s
+                GROUP BY u.id, u.username, u.role, u.is_class_teacher, u.created_at
+                ORDER BY u.id DESC
                 LIMIT %s OFFSET %s
             """
             cursor.execute(sql, ("%" + search + "%", limit, offset))
         else:
-            sql_count = "SELECT COUNT(*) FROM users"
+            sql_count = "SELECT COUNT(*) FROM users WHERE role = 'teacher'"
             cursor.execute(sql_count)
             total = cursor.fetchone()[0]
 
             sql = """
-                SELECT id, username, role, created_at
-                FROM users
-                ORDER BY id DESC
+                SELECT 
+                    u.id, 
+                    u.username, 
+                    u.role, 
+                    u.is_class_teacher,
+                    u.created_at,
+                    GROUP_CONCAT(DISTINCT s.subject SEPARATOR '、') AS subjects,
+                    GROUP_CONCAT(DISTINCT CONCAT(c.grade, c.class, '班') SEPARATOR '、') AS classes
+                FROM users u
+                LEFT JOIN teacher_subjects ts ON u.id = ts.teacher_id
+                LEFT JOIN subjects s ON ts.subject_id = s.id
+                LEFT JOIN teacher_classes tc ON u.id = tc.teacher_id
+                LEFT JOIN class c ON tc.class_id = c.id
+                WHERE u.role = 'teacher'
+                GROUP BY u.id, u.username, u.role, u.is_class_teacher, u.created_at
+                ORDER BY u.id DESC
                 LIMIT %s OFFSET %s
             """
             cursor.execute(sql, (limit, offset))
@@ -1698,10 +1729,13 @@ def get_admins():
                 {
                     "id": row[0],
                     "username": row[1],
-                    "role": row[2],  # 新增 role 字段
+                    "role": row[2],
+                    "is_class_teacher": row[3] if row[3] is not None else 0,
                     "created_at": (
-                        row[3].strftime("%Y-%m-%d %H:%M:%S") if row[3] else None
+                        row[4].strftime("%Y-%m-%d %H:%M:%S") if row[4] else None
                     ),
+                    "subjects": row[5] if row[5] else "",
+                    "classes": row[6] if row[6] else "",
                 }
             )
 
@@ -1719,67 +1753,162 @@ def get_admins():
         )
 
     except Exception as e:
-        print("❌ 查询管理员列表失败：", e)
-        return jsonify({"code": 500, "message": "服务器错误"}), 500
-
+        print("❌ 查询教师列表失败：", e)
+        return jsonify({"code": 500, "message": str(e)}), 500
     finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.close()
+        cursor.close()
+        conn.close()
 
 
-# 用户管理修改身份
-@app.route("/api/users/<int:user_id>/role", methods=["PUT"])
-def update_user_role(user_id):
-    # 验证 Token
+# 编辑弹窗回显
+@app.route("/api/users/<int:user_id>", methods=["GET"])
+def get_user_detail(user_id):
     payload = verify_token()
     if not payload:
         return jsonify({"code": 401, "message": "未登录或登录已过期"}), 401
 
-    # 权限检查：只有管理员可以修改他人角色
+    # 权限检查：只有管理员可以查看教师详情
     if payload.get("role") != "admin":
         return jsonify({"code": 403, "message": "权限不足"}), 403
-
-    data = request.get_json()
-    new_role = data.get("role")
-
-    # 校验角色是否合法
-    valid_roles = ["user", "teacher", "admin"]
-    if new_role not in valid_roles:
-        return (
-            jsonify(
-                {
-                    "code": 400,
-                    "message": "无效的角色，允许的角色为：user, teacher, admin",
-                }
-            ),
-            400,
-        )
 
     conn = pymysql.connect(**DB_CONFIG)
     cursor = conn.cursor()
 
     try:
-        # 检查用户是否存在
+        # 查询用户基本信息
+        cursor.execute(
+            """
+            SELECT id, username, role, is_class_teacher
+            FROM users
+            WHERE id = %s
+        """,
+            (user_id,),
+        )
+        user = cursor.fetchone()
+        if not user:
+            return jsonify({"code": 404, "message": "用户不存在"}), 404
+
+        # 只允许查询教师
+        if user[2] != "teacher":
+            return jsonify({"code": 400, "message": "只能查询教师信息"}), 400
+
+        # 查询任课科目 ID
+        cursor.execute(
+            """
+            SELECT subject_id
+            FROM teacher_subjects
+            WHERE teacher_id = %s
+        """,
+            (user_id,),
+        )
+        subject_ids = [row[0] for row in cursor.fetchall()]
+
+        # 查询所授班级 ID
+        cursor.execute(
+            """
+            SELECT class_id
+            FROM teacher_classes
+            WHERE teacher_id = %s
+        """,
+            (user_id,),
+        )
+        class_ids = [row[0] for row in cursor.fetchall()]
+
+        return (
+            jsonify(
+                {
+                    "code": 200,
+                    "data": {
+                        "id": user[0],
+                        "username": user[1],
+                        "role": user[2],
+                        "is_class_teacher": user[3] if user[3] is not None else 0,
+                        "subject_ids": subject_ids,
+                        "class_ids": class_ids,
+                    },
+                }
+            ),
+            200,
+        )
+
+    except Exception as e:
+        print("❌ 查询用户详情失败：", e)
+        return jsonify({"code": 500, "message": str(e)}), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+
+# 用户管理修改身份
+@app.route("/api/users/<int:user_id>", methods=["PUT"])
+def update_user(user_id):
+    # 验证 Token
+    payload = verify_token()
+    if not payload:
+        return jsonify({"code": 401, "message": "未登录或登录已过期"}), 401
+
+    # 权限检查：只有管理员可以编辑教师
+    if payload.get("role") != "admin":
+        return jsonify({"code": 403, "message": "权限不足"}), 403
+
+    data = request.get_json()
+    username = data.get("username")
+    is_class_teacher = data.get("is_class_teacher", 0)
+    subject_ids = data.get("subject_ids", [])  # 任课科目ID列表
+    class_ids = data.get("class_ids", [])  # 所授班级ID列表
+
+    # 校验
+    if not username or not username.strip():
+        return jsonify({"code": 400, "message": "教师姓名不能为空"}), 400
+
+    conn = pymysql.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+
+    try:
+        # 1. 检查用户是否存在，且角色为 teacher
         cursor.execute("SELECT id, role FROM users WHERE id = %s", (user_id,))
         user = cursor.fetchone()
         if not user:
             return jsonify({"code": 404, "message": "用户不存在"}), 404
 
-        # 不能修改自己的角色（防止管理员把自己降级）
-        current_user_id = payload.get("user_id")
-        if user_id == current_user_id:
-            return jsonify({"code": 403, "message": "不能修改自己的角色"}), 403
+        if user[1] != "teacher":
+            return jsonify({"code": 400, "message": "只能编辑教师用户"}), 400
 
-        # 更新角色
-        cursor.execute("UPDATE users SET role = %s WHERE id = %s", (new_role, user_id))
+        # 2. 检查用户名是否已被其他用户占用
+        cursor.execute(
+            "SELECT id FROM users WHERE username = %s AND id != %s",
+            (username.strip(), user_id),
+        )
+        if cursor.fetchone():
+            return jsonify({"code": 400, "message": "用户名已存在"}), 400
+
+        # 3. 更新用户基本信息
+        cursor.execute(
+            "UPDATE users SET username = %s, is_class_teacher = %s WHERE id = %s",
+            (username.strip(), is_class_teacher, user_id),
+        )
+
+        # 4. 更新任课科目（先删后插）
+        cursor.execute("DELETE FROM teacher_subjects WHERE teacher_id = %s", (user_id,))
+        for subject_id in subject_ids:
+            cursor.execute(
+                "INSERT INTO teacher_subjects (teacher_id, subject_id) VALUES (%s, %s)",
+                (user_id, subject_id),
+            )
+
+        # 5. 更新所授班级（先删后插）
+        cursor.execute("DELETE FROM teacher_classes WHERE teacher_id = %s", (user_id,))
+        for class_id in class_ids:
+            cursor.execute(
+                "INSERT INTO teacher_classes (teacher_id, class_id) VALUES (%s, %s)",
+                (user_id, class_id),
+            )
+
         conn.commit()
-
-        return jsonify({"code": 200, "message": f"用户角色已更新为：{new_role}"}), 200
+        return jsonify({"code": 200, "message": "教师信息更新成功"}), 200
 
     except Exception as e:
-        print("❌ 修改用户角色失败：", e)
+        print("❌ 更新教师信息失败：", e)
         conn.rollback()
         return jsonify({"code": 500, "message": str(e)}), 500
 
